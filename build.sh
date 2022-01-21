@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc -o diff.so diff.c $(yed --print-cflags) $(yed --print-ldflags)
+g++ -o diff.so diff.cpp $(yed --print-cflags) $(yed --print-ldflags) -Wno-error -fpermissive
