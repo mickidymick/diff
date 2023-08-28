@@ -25,22 +25,9 @@ using namespace std;
 #define LEFT  (0)
 #define RIGHT (1)
 
-typedef struct buffer_line_t {
-    int old_row;         //row that this line is from in the old buffer
-    int collapsed_start; //start of the collapsed row in the old buffer
-    int collapsed_end;   //end of the collapsed row in the old buffer
-    int row_type;        //type of this row
-    int start_col;       //start of the change
-    int end_col;         //end of the change
-    buffer_line(){
-      old_row         =  0;
-      collapsed_start = -1;
-      collapsed_end   = -1;
-      row_type        = -1;
-      start_col       = -1;
-      end_col         = -1;
-    };
-}buffer_line;
+#define INS (1)
+#define DEL (2)
+#define EQL (3)
 
 typedef struct diff_buff_t {
     string              buff_name; //original buffers name
@@ -76,7 +63,7 @@ extern "C" {
         yed_event_handler line_draw_eh;
         line_draw_eh.kind = EVENT_LINE_PRE_DRAW;
         line_draw_eh.fn   = line_draw;
-//         yed_plugin_add_event_handler(self, line_draw_eh);
+        yed_plugin_add_event_handler(self, line_draw_eh);
 
         yed_plugin_set_unload_fn(self, unload);
         yed_plugin_set_command(self, "diff", diff);
@@ -87,6 +74,32 @@ extern "C" {
         return 0;
     }
 }
+
+class Line_diff {
+    public:
+    int    type;
+    int    a_num;
+    string a_line;
+    int    b_num;
+    string b_line;
+
+    Line_diff::Line_diff(int t, int a_n, string a, int b_n, string b) {
+        type   = t;
+        a_num  = a_n;
+        a_line = a;
+        b_num  = b_n;
+        b_line = b;
+    }
+};
+
+vector<Line_diff> l_diff;
+
+typedef struct type_t {
+    int a;
+    int b;
+} type;
+
+vector<type> type_arr;
 
 typedef struct line_obj_t {
     int    line_number;
@@ -106,6 +119,8 @@ class Myers {
         Buffer           buffer_b;
 
         // Member Functions
+
+        //Constructor
         Myers::Myers() {
             string A;
             string B;
@@ -178,38 +193,40 @@ class Myers {
             Error = 0;
         }
 
-        int shortest_edit(void) {
+        int wrap_indx(int size, int indx) {
+            if ( indx < 0 ) {
+                return (size + indx);
+            }
+
+            return indx;
+        }
+
+        //Finds the Shortest Edit Path
+        vector<vector<int>> shortest_edit(void) {
             int max;
-            max = buffer_a.num_lines + buffer_b.num_lines;
-
-            int v[2 * max + 1];
-            v[1] = 0;
-
             int tmp_k;
             int tmp_k_add;
             int tmp_k_min;
+            int x;
+            int y;
+            int size;
 
-            int x = 0;
-            int y = 0;
+            max  = buffer_a.num_lines + buffer_b.num_lines;
+            size = 2 * max + 1;
+            type_arr.resize(size);
+
+            vector<int> v(2 * max + 1);
+            v[1] = 0;
+            vector<vector<int>> trace;
+
 
             for(int d = 0; d <= max; d++) {
+                trace.push_back(v);
                 for(int k = -d; k <= d; k+=2) {
-                    if (k + 1 < 0) {
-                        tmp_k_add = (2 * max + 1) + k + 1;
+                    if (k == -d || (k != d && v[wrap_indx(size, k - 1)] < v[wrap_indx(size, k + 1)])) {
+                        x = v[wrap_indx(size, k + 1)];
                     } else {
-                        tmp_k_add = k + 1;
-                    }
-
-                    if (k - 1 < 0) {
-                        tmp_k_min = (2 * max + 1) + k - 1;
-                    } else {
-                        tmp_k_min = k - 1;
-                    }
-
-                    if (k == -d || (k != d && v[tmp_k_min] < v[tmp_k_add])) {
-                        x = v[tmp_k_add];
-                    } else {
-                        x = v[tmp_k_min] + 1;
+                        x = v[wrap_indx(size, k - 1)] + 1;
                     }
 
                     y = x - k;
@@ -221,32 +238,112 @@ class Myers {
                                y++;
                     }
 
-                    if (k < 0) {
-                        tmp_k = (2 * max + 1) + k;
-                    } else {
-                        tmp_k = k;
-                    }
-                    v[tmp_k] = x;
+                    v[wrap_indx(size, k)] = x;
 
                     if (x >= buffer_a.num_lines &&
                         y >= buffer_b.num_lines) {
 //                         LOG_FN_ENTER();
 //                         yed_log("Shortest Edit: %d\n", d);
 //                         LOG_EXIT();
-                        return d;
+                        return trace;
                     }
                 }
             }
         }
 
+        backtrack_yield(int prev_x, int prev_y, int x, int y) {
+//             DBG("(%d, %d) -> (%d, %d)\n", prev_x, prev_y, x, y);
+
+            string a_line;
+            string b_line;
+
+            if (prev_x >= 0 && prev_x < buffer_a.line_objs.size()) {
+                a_line = buffer_a.line_objs[prev_x].line;
+            }
+            if (prev_y >= 0 && prev_y < buffer_b.line_objs.size()) {
+                b_line = buffer_b.line_objs[prev_y].line;
+            }
+
+            if (x == prev_x) {
+                Line_diff tmp_line_diff(INS, 0, "", prev_y + 1, b_line);
+                l_diff.insert(l_diff.begin(), tmp_line_diff);
+                type_arr[prev_y + 1].b = INS;
+            } else if (y == prev_y) {
+                Line_diff tmp_line_diff(DEL, prev_x + 1, a_line, 0, "");
+                l_diff.insert(l_diff.begin(), tmp_line_diff);
+                type_arr[prev_x + 1].a = DEL;
+            } else {
+                Line_diff tmp_line_diff(EQL, prev_x + 1, a_line, prev_y + 1, b_line);
+                l_diff.insert(l_diff.begin(), tmp_line_diff);
+                type_arr[prev_x + 1].a = EQL;
+                type_arr[prev_y + 1].b = EQL;
+            }
+        }
+
+        //Backtracks the shortest edit path finiding the path
+        void backtrack(vector<vector<int>> trace, int x, int y) {
+            int         max;
+            int         size;
+            int         k;
+            int         prev_k;
+            int         prev_x;
+            int         prev_y;
+            vector<int> v;
+
+            max  = buffer_a.num_lines + buffer_b.num_lines;
+            size = 2 * max + 1;
+
+            for (int d = trace.size() - 1; d >= 0; d--) {
+
+                v = trace[d];
+                k = x - y;
+
+                if ( k == -d ||
+                     (k != d && v[wrap_indx(size, k - 1)] < v[wrap_indx(size, k + 1)])) {
+                    prev_k = k + 1;
+                } else {
+                    prev_k = k - 1;
+                }
+
+                prev_x = v[wrap_indx(size, prev_k)];
+                prev_y = prev_x - prev_k;
+
+                while (x > prev_x && y > prev_y) {
+                    backtrack_yield(x - 1, y - 1, x, y);
+                    x--;
+                    y--;
+                }
+
+                if (d > 0) {
+                    backtrack_yield(prev_x, prev_y, x, y);
+                }
+
+                x = prev_x;
+                y = prev_y;
+            }
+        }
+
+        //Main diff func
         void diff(void) {
             if (Error) {
                 yed_cerr("Error!");
                 return;
             }
 
-            int se = shortest_edit();
+            vector<vector<int>> se = shortest_edit();
 
+            backtrack(se, buffer_a.num_lines, buffer_b.num_lines);
+
+//             LOG_FN_ENTER();
+//             yed_log("   \n");
+//             for (int i = 0; i < l_diff.size(); i++) {
+//                 string type  = l_diff[i].type == INS ? "+" : l_diff[i].type == DEL ? "-" : " ";
+//                 string left  = l_diff[i].type == INS ? " " : to_string(l_diff[i].a_num);
+//                 string right = l_diff[i].type == DEL ? " " : to_string(l_diff[i].b_num);
+//                 string l     = l_diff[i].type == INS ? l_diff[i].b_line : l_diff[i].a_line;
+//                 yed_log("%s   %s   %s   %s\n", type.c_str(), left.c_str(), right.c_str(), l.c_str());
+//             }
+//             LOG_EXIT();
         }
 };
 
@@ -269,9 +366,7 @@ void diff(int n_args, char **args) {
     buff_2 = args[1];
 
     if (strcmp(buff_1, buff_2) == 0) {
-        LOG_FN_ENTER();
-        yed_log("The two buffers must be different!");
-        LOG_EXIT();
+        yed_cerr("The two buffers must be different!");
         return;
     }
     get_or_make_buffers(buff_1, buff_2);
@@ -314,6 +409,11 @@ static void line_draw(yed_event *event) {
         return;
     }
 
+    if (event->frame         == NULL
+    ||  event->frame->buffer == NULL) {
+        return;
+    }
+
     for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
         if (d_buffers_it->second.buff_num == LEFT) {
             buff_1 = d_buffers_it->second.buff;
@@ -332,21 +432,27 @@ static void line_draw(yed_event *event) {
         return;
     }
 
-    snprintf(tmp_buff, 512, "*%s", d_buffers_it_2->first.c_str());
+    snprintf(tmp_buff, 512, "*%s", d_buffers_it_1->first.c_str());
 
-//     if (strcmp(event->frame->buffer->name, tmp_buff) == 0) {
-//         if (d_buffers_it_2->second.lines[event->row-1].start_col != -1) {
-//             loc = 1;
-//             new_attr = yed_parse_attrs("&bad swap");
-//             array_traverse(event->eline_attrs, attr) {
-//                 if (loc >= d_buffers_it_2->second.lines[event->row-1].start_col &&
-//                     loc <= d_buffers_it_2->second.lines[event->row-1].end_col) {
-//                         yed_combine_attrs(attr, &new_attr);
-//                 }
-//                 loc++;
-//             }
-//         }
-//     }
+    yed_attrs *attr_tmp;
+    yed_line  *line;
+
+    if (strcmp(event->frame->buffer->name, tmp_buff) == 0) {
+        if (type_arr[event->row].a == INS) {
+            attr_tmp = &yed_parse_attrs("bg &green");
+        } else if (type_arr[event->row].a == DEL) {
+            attr_tmp = &yed_parse_attrs("&red.bg");
+        } else if (type_arr[event->row].a == EQL) {
+            attr_tmp = &yed_parse_attrs("bg &blue");
+        }
+
+        line = yed_buff_get_line(event->frame->buffer, event->row);
+        if (line == NULL) { return; }
+
+        for (int loc = 1; loc <= line->visual_width; loc += 1) {
+            yed_eline_set_col_attrs(event, loc, attr_tmp);
+        }
+    }
 }
 
 static void row_draw(yed_event *event) {
