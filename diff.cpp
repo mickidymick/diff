@@ -96,6 +96,7 @@ static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_bu
 static void update_diff_buffer(yed_buffer_ptr_t buff, diff_buff &d_buff);
 static void row_draw(yed_event *event);
 static void line_draw(yed_event *event);
+static void cursor_move(yed_event *event);
 
 extern "C" {
     int yed_plugin_boot(yed_plugin *self) {
@@ -112,6 +113,12 @@ extern "C" {
         line_draw_eh.kind = EVENT_LINE_PRE_DRAW;
         line_draw_eh.fn   = line_draw;
         yed_plugin_add_event_handler(self, line_draw_eh);
+
+    /*     CURSOR_PRE_MOVE */
+        yed_event_handler cursor_move_eh;
+        cursor_move_eh.kind = EVENT_CURSOR_PRE_MOVE;
+        cursor_move_eh.fn   = cursor_move;
+        yed_plugin_add_event_handler(self, cursor_move_eh);
 
         yed_plugin_set_unload_fn(self, unload);
         yed_plugin_set_command(self, "diff", diff);
@@ -637,4 +644,59 @@ static void line_draw(yed_event *event) {
 //             yed_eline_set_col_attrs(event, loc, attr_tmp);
 //         }
 //     }
+}
+
+static void cursor_move(yed_event *event) {
+    yed_buffer_ptr_t buff_1;
+    yed_buffer_ptr_t buff_2;
+    map<string, diff_buff>::iterator d_buffers_it_1;
+    map<string, diff_buff>::iterator d_buffers_it_2;
+    char tmp_buff_a[512];
+    char tmp_buff_b[512];
+    int current_row;
+
+    if (d_buffers.size() == 0) {
+        return;
+    }
+
+    if (event->frame                           == NULL
+    ||  event->frame->buffer                   == NULL
+    ||  event->frame->tree                     == NULL
+    ||  event->frame->tree->parent             == NULL
+    ||  event->frame->tree->parent->split_kind != FTREE_VSPLIT
+    ||  event->frame->tree->parent->child_trees[0]->frame == NULL
+    ||  event->frame->tree->parent->child_trees[1]->frame == NULL
+    ||  event->frame->tree->parent->child_trees[0]->frame->buffer == NULL
+    ||  event->frame->tree->parent->child_trees[1]->frame->buffer == NULL) {
+        return;
+    }
+
+    for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
+        if (d_buffers_it->second.buff_num == LEFT) {
+            buff_1 = d_buffers_it->second.buff;
+            d_buffers_it_1 = d_buffers_it;
+        }else if (d_buffers_it->second.buff_num == RIGHT) {
+            buff_2 = d_buffers_it->second.buff;
+            d_buffers_it_2 = d_buffers_it;
+        }
+    }
+
+    if (buff_1 == NULL) {
+        yed_cerr("Couldn't find the first diff buffer.");
+        return;
+    }else if (buff_2 == NULL) {
+        yed_cerr("Couldn't find the second diff buffer.");
+        return;
+    }
+
+    snprintf(tmp_buff_a, 512, "*%s", d_buffers_it_1->first.c_str());
+    snprintf(tmp_buff_b, 512, "*%s", d_buffers_it_2->first.c_str());
+
+    if (strcmp(event->frame->buffer->name, tmp_buff_a) == 0) {
+            current_row = event->frame->tree->parent->child_trees[1]->frame->cursor_line;
+//             yed_set_cursor_far_within_frame(event->frame->tree->parent->child_trees[1]->frame, event->new_row, 1);
+    }else if (strcmp(event->frame->buffer->name, tmp_buff_b) == 0) {
+            current_row = event->frame->tree->parent->child_trees[0]->frame->cursor_line;
+            yed_set_cursor_far_within_frame(event->frame->tree->parent->child_trees[0]->frame, event->new_row, 1);
+    }
 }
