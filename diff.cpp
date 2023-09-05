@@ -28,27 +28,74 @@ using namespace std;
 #define INS (1)
 #define DEL (2)
 #define EQL (3)
+#define CHG (4)
 
 typedef struct diff_buff_t {
     string              buff_name; //original buffers name
     int                 buff_num;  //use macro
     yed_buffer_ptr_t    buff;      //original buffers ptr
-}diff_buff;
+} diff_buff;
 
 map<string, diff_buff>           d_buffers;
 map<string, diff_buff>::iterator d_buffers_it;
 
-static void unload(yed_plugin *self);
+typedef struct line_color_t {
+    int         line_type;
+    vector<int> char_type;
+} line_color;
+
+vector<line_color> color_diff;
+
+class Line_diff {
+    public:
+    int    type;
+    int    a_num;
+    string a_line;
+    int    b_num;
+    string b_line;
+
+    Line_diff(int t, int a_n, string a, int b_n, string b) {
+        type   = t;
+        a_num  = a_n;
+        a_line = a;
+        b_num  = b_n;
+        b_line = b;
+    }
+};
+
+vector<Line_diff> l_diff;
+
+typedef struct type_t {
+    int a;
+    int b;
+} type;
+
+vector<type> type_arr;
+
+typedef struct buffer_t {
+      int              num_lines;
+      vector<string>   lines;
+} Buffer;
+
+Buffer buffer_a;
+Buffer buffer_b;
+
+#include "myers_diff.hpp"
+
+//Base Yed Plugin Functions
 static void get_or_make_buffers(char *buff_1, char *buff_2);
-static void update_diff_buffer(yed_buffer_ptr_t buff, diff_buff &d_buff);
-// static void align_buffers(Myers myers, diff_buff buff_1, diff_buff buff_2);
+static void unload(yed_plugin *self);
 static  int diff_completion(char *name, struct yed_completion_results_t *comp_res);
 static  int diff_completion_multiple(char *name, struct yed_completion_results_t *comp_res);
-static void myers_diff(void);
-static void line_draw(yed_event *event);
-static void row_draw(yed_event *event);
 static void clear_buffers(char* b1, char* b2, char* b3, char* b4);
-       void diff(int n_args, char **args);
+
+//Diff Functions
+static void diff(int n_args, char **args);
+static int  init(void);
+static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_buff buff_2);
+static void update_diff_buffer(yed_buffer_ptr_t buff, diff_buff &d_buff);
+static void row_draw(yed_event *event);
+static void line_draw(yed_event *event);
 
 extern "C" {
     int yed_plugin_boot(yed_plugin *self) {
@@ -76,318 +123,117 @@ extern "C" {
     }
 }
 
-vector<int> color_diff;
+static void get_or_make_buffers(char *buff_1, char *buff_2) {
+    char                                         tmp_buff[512];
+    char                                         buff[512];
+    char                                        *check_buff;
+    yed_line                                    *line;
+    yed_buffer                                  *buffer;
+    tree_it(yed_buffer_name_t, yed_buffer_ptr_t) buffers_it;
 
-class Line_diff {
-    public:
-    int    type;
-    int    a_num;
-    string a_line;
-    int    b_num;
-    string b_line;
-
-    Line_diff::Line_diff(int t, int a_n, string a, int b_n, string b) {
-        type   = t;
-        a_num  = a_n;
-        a_line = a;
-        b_num  = b_n;
-        b_line = b;
+    buffers_it = tree_lookup(ys->buffers, buff_1);
+    if (!tree_it_good(buffers_it)) {
+        YEXE("buffer-hidden", buff_1);
     }
-};
 
-vector<Line_diff> l_diff;
+    buffers_it = tree_lookup(ys->buffers, buff_2);
+    if (!tree_it_good(buffers_it)) {
+        YEXE("buffer-hidden", buff_2);
+    }
 
-typedef struct type_t {
-    int a;
-    int b;
-} type;
+    tree_traverse(ys->buffers, buffers_it) {
+        if (tree_it_val(buffers_it)->kind == BUFF_KIND_FILE &&
+            tree_it_val(buffers_it)->flags != BUFF_SPECIAL) {
 
-vector<type> type_arr;
-
-typedef struct line_obj_t {
-    int    line_number;
-    string line;
-} line_obj;
-
-typedef struct buffer_t {
-      int              num_lines;
-      vector<line_obj> line_objs;
-} Buffer;
-
-class Myers {
-    public:
-        int              Error; //if there is an error in the construction phase
-        int              max;
-        Buffer           buffer_a;
-        Buffer           buffer_b;
-
-        // Member Functions
-        int init(void) {
-            string A;
-            string B;
-            yed_buffer_ptr_t buff_1;
-            yed_buffer_ptr_t buff_2;
-            buff_1      = NULL;
-            buff_2      = NULL;
-            map<string, diff_buff>::iterator d_buffers_it_1;
-            map<string, diff_buff>::iterator d_buffers_it_2;
-
-            for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
-                if (d_buffers_it->second.buff_num == LEFT) {
-                    buff_1 = d_buffers_it->second.buff;
-                    d_buffers_it_1 = d_buffers_it;
-                }else if (d_buffers_it->second.buff_num == RIGHT) {
-                    buff_2 = d_buffers_it->second.buff;
-                    d_buffers_it_2 = d_buffers_it;
-                }
-            }
-
-            if (buff_1 == NULL) {
-                yed_cerr("Couldn't find the first diff buffer.");
-                Error = 1;
-                return 1;
-            }else if (buff_2 == NULL) {
-                yed_cerr("Couldn't find the second diff buffer.");
-                Error = 1;
-                return 1;
-            }
-
-            int row;
-            yed_line *line;
-
-            row = 1;
-            bucket_array_traverse(buff_1->lines, line) {
-                array_zero_term(line->chars);
-                A.clear();
-                A.append((char *)(line->chars.data));
-                A.append("\n");
-                line_obj tmp_a;
-                tmp_a.line        = A;
-                tmp_a.line_number = row;
-                buffer_a.line_objs.push_back(tmp_a);
-                row++;
-            }
-            buffer_a.num_lines = row - 1;
-
-            row = 1;
-            bucket_array_traverse(buff_2->lines, line) {
-                array_zero_term(line->chars);
-                B.clear();
-                B.append((char *)(line->chars.data));
-                B.append("\n");
-                line_obj tmp_b;
-                tmp_b.line        = B;
-                tmp_b.line_number = row;
-                buffer_b.line_objs.push_back(tmp_b);
-                row++;
-            }
-            buffer_b.num_lines = row - 1;
-
-//             LOG_FN_ENTER();
-//             yed_log("%s\n", buff_1->name);
-//             for(auto i : buffer_a.line_objs) {
-//                 yed_log("%d: %s", i.line_number, i.line.c_str());
-//             }
-//             yed_log("%s\n", buff_2->name);
-//             for(auto i : buffer_b.line_objs) {
-//                 yed_log("%d: %s", i.line_number, i.line.c_str());
-//             }
-//             LOG_EXIT();
-            Error = 0;
-            return 0;
-        }
-
-        int wrap_indx(int size, int indx) {
-            if ( indx < 0 ) {
-                return (size + indx);
-            }
-
-            return indx;
-        }
-
-        //Finds the Shortest Edit Path
-        vector<vector<int>> shortest_edit(void) {
-            int max;
-            int tmp_k;
-            int tmp_k_add;
-            int tmp_k_min;
-            int x;
-            int y;
-            int size;
-
-            max  = buffer_a.num_lines + buffer_b.num_lines;
-            size = 2 * max + 1;
-            type_arr.resize(size);
-
-            vector<int> v(2 * max + 1);
-            v[1] = 0;
-            vector<vector<int>> trace;
-
-
-            for(int d = 0; d <= max; d++) {
-                trace.push_back(v);
-                for(int k = -d; k <= d; k+=2) {
-                    if (k == -d || (k != d && v[wrap_indx(size, k - 1)] < v[wrap_indx(size, k + 1)])) {
-                        x = v[wrap_indx(size, k + 1)];
-                    } else {
-                        x = v[wrap_indx(size, k - 1)] + 1;
-                    }
-
-                    y = x - k;
-
-                    while (x < buffer_a.num_lines &&
-                           y < buffer_b.num_lines &&
-                           buffer_a.line_objs[x].line == buffer_b.line_objs[y].line) {
-                               x++;
-                               y++;
-                    }
-
-                    v[wrap_indx(size, k)] = x;
-
-                    if (x >= buffer_a.num_lines &&
-                        y >= buffer_b.num_lines) {
-//                         LOG_FN_ENTER();
-//                         yed_log("Shortest Edit: %d\n", d);
-//                         LOG_EXIT();
-                        return trace;
-                    }
-                }
+            check_buff = tree_it_key(buffers_it);
+            if (strcmp(buff_1, check_buff) == 0) {
+                snprintf(buff, 512, "diff:%s", check_buff);
+                d_buffers_it = d_buffers.emplace(string(buff), diff_buff{}).first;
+                d_buffers_it->second.buff_name = string(check_buff);
+                d_buffers_it->second.buff      = tree_it_val(buffers_it);
+                d_buffers_it->second.buff_num  = LEFT;
+            }else if (strcmp(buff_2, check_buff) == 0) {
+                snprintf(buff, 512, "diff:%s", check_buff);
+                d_buffers_it = d_buffers.emplace(string(buff), diff_buff{}).first;
+                d_buffers_it->second.buff_name = string(check_buff);
+                d_buffers_it->second.buff      = tree_it_val(buffers_it);
+                d_buffers_it->second.buff_num  = RIGHT;
             }
         }
+    }
 
-        backtrack_yield(int prev_x, int prev_y, int x, int y) {
-//             DBG("(%d, %d) -> (%d, %d)\n", prev_x, prev_y, x, y);
+    for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
+        snprintf(tmp_buff, 512, "*%s", d_buffers_it->first.c_str());
+        buffer = yed_get_buffer(tmp_buff);
 
-            string a_line;
-            string b_line;
-
-            if (prev_x >= 0 && prev_x < buffer_a.line_objs.size()) {
-                a_line = buffer_a.line_objs[prev_x].line;
-            }
-            if (prev_y >= 0 && prev_y < buffer_b.line_objs.size()) {
-                b_line = buffer_b.line_objs[prev_y].line;
-            }
-
-            if (x == prev_x) {
-                Line_diff tmp_line_diff(INS, prev_x + 1, "", prev_y + 1, b_line);
-                l_diff.insert(l_diff.begin(), tmp_line_diff);
-                type_arr[prev_y + 1].b = INS;
-            } else if (y == prev_y) {
-                Line_diff tmp_line_diff(DEL, prev_x + 1, a_line, prev_y + 1, "");
-                l_diff.insert(l_diff.begin(), tmp_line_diff);
-                type_arr[prev_x + 1].a = DEL;
-            } else {
-                Line_diff tmp_line_diff(EQL, prev_x + 1, a_line, prev_y + 1, b_line);
-                l_diff.insert(l_diff.begin(), tmp_line_diff);
-                type_arr[prev_x + 1].a = EQL;
-                type_arr[prev_y + 1].b = EQL;
-            }
+        if (buffer == NULL) {
+            buffer = yed_create_buffer(tmp_buff);
+            buffer->flags |= BUFF_SPECIAL;
         }
 
-        //Backtracks the shortest edit path finiding the path
-        void backtrack(vector<vector<int>> trace, int x, int y) {
-            int         max;
-            int         size;
-            int         k;
-            int         prev_k;
-            int         prev_x;
-            int         prev_y;
-            vector<int> v;
-
-            max  = buffer_a.num_lines + buffer_b.num_lines;
-            size = 2 * max + 1;
-
-            for (int d = trace.size() - 1; d >= 0; d--) {
-
-                v = trace[d];
-                k = x - y;
-
-                if ( k == -d ||
-                     (k != d && v[wrap_indx(size, k - 1)] < v[wrap_indx(size, k + 1)])) {
-                    prev_k = k + 1;
-                } else {
-                    prev_k = k - 1;
-                }
-
-                prev_x = v[wrap_indx(size, prev_k)];
-                prev_y = prev_x - prev_k;
-
-                while (x > prev_x && y > prev_y) {
-                    backtrack_yield(x - 1, y - 1, x, y);
-                    x--;
-                    y--;
-                }
-
-                if (d > 0) {
-                    backtrack_yield(prev_x, prev_y, x, y);
-                }
-
-                x = prev_x;
-                y = prev_y;
-            }
-        }
-
-        //Main diff func
-        int diff(void) {
-            if (Error) {
-                yed_cerr("Error!");
-                return 1;
-            }
-
-            vector<vector<int>> se = shortest_edit();
-
-            backtrack(se, buffer_a.num_lines, buffer_b.num_lines);
-
-//             LOG_FN_ENTER();
-//             yed_log("   \n");
-//             for (int i = 0; i < l_diff.size(); i++) {
-//                 string type  = l_diff[i].type == INS ? "+" : l_diff[i].type == DEL ? "-" : " ";
-//                 string left  = l_diff[i].type == INS ? " " : to_string(l_diff[i].a_num);
-//                 string right = l_diff[i].type == DEL ? " " : to_string(l_diff[i].b_num);
-//                 string l     = l_diff[i].type == INS ? l_diff[i].b_line : l_diff[i].a_line;
-//                 yed_log("%s   %s   %s   %s\n", type.c_str(), left.c_str(), right.c_str(), l.c_str());
-//             }
-//             LOG_EXIT();
-            return 0;
-        }
-};
-
-static void align_buffers(Myers myers, diff_buff buff_1, diff_buff buff_2) {
-    char          tmp_buff[512];
-    yed_buffer_t* buff;
-    int           a = 0;
-    int           b = 0;
-
-    color_diff.clear();
-    color_diff.push_back(0);
-
-    for (int i = 0; i < l_diff.size(); i++) {
-        if (l_diff[i].type == INS) {
-            snprintf(tmp_buff, 512, "*diff:%s", buff_1.buff->name);
-            buff = yed_get_buffer(tmp_buff);
-            if (buff != NULL) {
-                yed_buff_insert_line_no_undo(buff, l_diff[i].a_num + a);
-                a++;
-                color_diff.push_back(INS);
-                DBG("INS\n");
-            }
-        } else if (l_diff[i].type == DEL) {
-            snprintf(tmp_buff, 512, "*diff:%s", buff_2.buff->name);
-            buff = yed_get_buffer(tmp_buff);
-            if (buff != NULL) {
-                yed_buff_insert_line_no_undo(buff, l_diff[i].b_num + b);
-                b++;
-                color_diff.push_back(DEL);
-                DBG("DEL\n");
-            }
-        } else {
-            color_diff.push_back(EQL);
-            DBG("EQL\n");
-        }
+        update_diff_buffer(buffer, d_buffers_it->second);
     }
 }
 
-void diff(int n_args, char **args) {
+static void unload(yed_plugin *self) {
+}
+
+static int diff_completion(char *name, struct yed_completion_results_t *comp_res) {
+    int                                          ret;
+    array_t                                      list;
+    char                                        *tmp;
+    char                                         loc[256];
+    tree_it(yed_buffer_name_t, yed_buffer_ptr_t) buffers_it;
+
+    ret = 0;
+    list = array_make(char *);
+
+    tree_traverse(ys->buffers, buffers_it) {
+        if (tree_it_val(buffers_it)->kind == BUFF_KIND_FILE &&
+            tree_it_val(buffers_it)->flags != BUFF_SPECIAL) {
+
+            array_push(list, tree_it_key(buffers_it));
+        }
+    }
+
+    FN_BODY_FOR_COMPLETE_FROM_ARRAY(name, array_len(list), (char **)array_data(list), comp_res, ret);
+    array_free(list);
+    return ret;
+}
+
+static int diff_completion_multiple(char *name, struct yed_completion_results_t *comp_res) {
+    char *tmp[2] = {"file", "diff-compl"};
+    return yed_complete_multiple(2, tmp, name, comp_res);
+}
+
+static void clear_buffers(char* b1, char* b2, char* b3, char* b4) {
+    char        tmp_buff[512];
+    yed_buffer *buffer;
+
+    buffer = yed_get_buffer(b1);
+    if (buffer != NULL) {
+        yed_free_buffer(buffer);
+    }
+
+    buffer = yed_get_buffer(b2);
+    if (buffer != NULL) {
+        yed_free_buffer(buffer);
+    }
+
+    buffer = yed_get_buffer(b3);
+    if (buffer != NULL) {
+        yed_free_buffer(buffer);
+    }
+
+    buffer = yed_get_buffer(b4);
+    if (buffer != NULL) {
+        yed_free_buffer(buffer);
+    }
+
+    d_buffers.clear();
+}
+
+static void diff(int n_args, char **args) {
     char                                 *buff_1;
     char                                 *buff_2;
     char                                  tmp_buff_1[512];
@@ -420,11 +266,13 @@ void diff(int n_args, char **args) {
     d_buffers_it_1 = d_buffers.find(string(tmp_buff_1));
     d_buffers_it_2 = d_buffers.find(string(tmp_buff_2));
 
-    Myers myers;
-    if (myers.init()) {
+    if (init()) {
+        yed_cerr("could not initialize the diff");
         return;
     }
     l_diff.clear();
+
+    Myers<vector<string>> myers(buffer_a.lines, buffer_a.num_lines, buffer_b.lines, buffer_b.num_lines);
     int err = myers.diff();
 
     if (err) {
@@ -447,6 +295,287 @@ void diff(int n_args, char **args) {
     LOG_EXIT();
 }
 
+static int init(void) {
+    string A;
+    string B;
+    yed_buffer_ptr_t buff_1;
+    yed_buffer_ptr_t buff_2;
+    buff_1      = NULL;
+    buff_2      = NULL;
+    map<string, diff_buff>::iterator d_buffers_it_1;
+    map<string, diff_buff>::iterator d_buffers_it_2;
+
+    for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
+        if (d_buffers_it->second.buff_num == LEFT) {
+            buff_1 = d_buffers_it->second.buff;
+            d_buffers_it_1 = d_buffers_it;
+        }else if (d_buffers_it->second.buff_num == RIGHT) {
+            buff_2 = d_buffers_it->second.buff;
+            d_buffers_it_2 = d_buffers_it;
+        }
+    }
+
+    if (buff_1 == NULL) {
+        yed_cerr("Couldn't find the first diff buffer.");
+        return 1;
+    }else if (buff_2 == NULL) {
+        yed_cerr("Couldn't find the second diff buffer.");
+        return 1;
+    }
+
+    int row;
+    yed_line *line;
+
+    row = 1;
+    bucket_array_traverse(buff_1->lines, line) {
+        array_zero_term(line->chars);
+        A.clear();
+        A.append((char *)(line->chars.data));
+        A.append("\n");
+        buffer_a.lines.push_back(A);
+        row++;
+    }
+    buffer_a.num_lines = row - 1;
+
+    row = 1;
+    bucket_array_traverse(buff_2->lines, line) {
+        array_zero_term(line->chars);
+        B.clear();
+        B.append((char *)(line->chars.data));
+        B.append("\n");
+        buffer_b.lines.push_back(B);
+        row++;
+    }
+    buffer_b.num_lines = row - 1;
+
+    return 0;
+}
+
+static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_buff buff_2) {
+    char          tmp_buff[512];
+    yed_buffer_t* buff;
+    int           a = 0;
+    int           b = 0;
+    int           tmp_i;
+    line_color    line;
+    int           add = 0;
+    int           sub = 0;
+    color_diff.clear();
+    line.line_type = 0;
+    color_diff.push_back(line);
+
+    for (int i = 0; i < l_diff.size(); i++) {
+        line_color line1;
+        if (l_diff[i].type == INS) {
+            snprintf(tmp_buff, 512, "*diff:%s", buff_1.buff->name);
+            buff = yed_get_buffer(tmp_buff);
+            if (buff != NULL) {
+                DBG("%d: INS\n", i+1);
+                add++;
+
+//                 vector<string> tmp_1;
+//                 for (int c = 0; c < buffer_a.lines[i].size(); c++) {
+//                     tmp_1.push_back(string(1, buffer_a.lines[i][c]));
+//                 }
+//                 vector<string> tmp_2;
+//                 for (int c = 0; c < buffer_b.lines[i].size(); c++) {
+//                     tmp_2.push_back(string(1, buffer_b.lines[i][c]));
+//                 }
+//                 Myers<vector<string>> myers_r(tmp_1, tmp_1.size(), tmp_2, tmp_2.size());
+//                 int err = myers_r.diff();
+            }
+        } else if (l_diff[i].type == DEL) {
+            snprintf(tmp_buff, 512, "*diff:%s", buff_2.buff->name);
+            buff = yed_get_buffer(tmp_buff);
+            if (buff != NULL) {
+                DBG("%d: DEL\n", i+1);
+                sub++;
+            }
+        } else {
+            DBG("%d: EQL\n", i+1);
+            if (i > 0) {
+                tmp_i = i - 1;
+            } else {
+                tmp_i = i;
+            }
+
+
+
+            int wierd = 0;
+            if (add < sub) {
+                if (add > 0) {
+                    for (int j = 0; j < add; j++) {
+                        line_color line2;
+                        line2.line_type = CHG;
+                        color_diff.push_back(line2);
+                        DBG("%d:   CHG\n", tmp_i);
+                        wierd = 1;
+                    }
+                }
+
+                snprintf(tmp_buff, 512, "*diff:%s", buff_2.buff->name);
+                buff = yed_get_buffer(tmp_buff);
+                if (buff != NULL) {
+                    for (int j = add; j < sub; j++) {
+                        line_color line2;
+                        char dashes[512];
+                        memset(dashes, '-', 512);
+                        if (wierd) {
+                            yed_buff_insert_line_no_undo(buff, l_diff[tmp_i].b_num + b + 1);
+                            yed_buff_insert_string(buff, dashes, l_diff[tmp_i].b_num + b + 1, 1);
+                        } else {
+                            yed_buff_insert_line_no_undo(buff, l_diff[tmp_i].b_num + b);
+                            yed_buff_insert_string(buff, dashes, l_diff[tmp_i].b_num + b, 1);
+                        }
+                        DBG("%d:   DEL b:%d row:%d f:%d\n", tmp_i, b, l_diff[tmp_i].b_num, l_diff[tmp_i].b_num + b);
+                        b++;
+                        line2.line_type = DEL;
+                        color_diff.push_back(line2);
+                    }
+                }
+            } else if (add > sub) {
+                if (sub > 0) {
+                    for (int j = 0; j < sub; j++) {
+                        line_color line2;
+                        line2.line_type = CHG;
+                        color_diff.push_back(line2);
+                        DBG("%d:   CHG\n", tmp_i);
+                        wierd = 1;
+                    }
+                }
+
+                snprintf(tmp_buff, 512, "*diff:%s", buff_1.buff->name);
+                buff = yed_get_buffer(tmp_buff);
+                if (buff != NULL) {
+                    for (int j = sub; j < add; j++) {
+                        line_color line2;
+                        char dashes[512];
+                        memset(dashes, '-', 512);
+                        if (wierd) {
+                            yed_buff_insert_line_no_undo(buff, l_diff[tmp_i].a_num + a);
+                            yed_buff_insert_string(buff, dashes, l_diff[tmp_i].a_num + a, 1);
+                        } else {
+                            yed_buff_insert_line_no_undo(buff, l_diff[tmp_i].a_num + a);
+                            yed_buff_insert_string(buff, dashes, l_diff[tmp_i].a_num + a, 1);
+                        }
+                        DBG("%d:   INS a:%d row:%d f:%d\n", tmp_i, a, l_diff[tmp_i].a_num, l_diff[tmp_i].a_num + a);
+                        a++;
+                        line2.line_type = INS;
+                        color_diff.push_back(line2);
+                    }
+                }
+            } else if (add > 0 && sub > 0) {
+                for (int j = 0; j < add; j++) {
+                    line_color line2;
+                    line2.line_type = CHG;
+                    color_diff.push_back(line2);
+                    DBG("%d:   CHG\n", tmp_i);
+                }
+            }
+
+            line1.line_type = EQL;
+            color_diff.push_back(line1);
+
+            add   = 0;
+            sub   = 0;
+            wierd = 0;
+        }
+    }
+}
+
+static void update_diff_buffer(yed_buffer_ptr_t buff, diff_buff &d_buff) {
+    yed_line *line;
+    int       row;
+
+    yed_buff_clear_no_undo(buff);
+
+    row = 1;
+    bucket_array_traverse(d_buff.buff->lines, line) {
+        yed_buffer_add_line_no_undo(buff);
+        yed_buff_set_line_no_undo(buff, row, line);
+        row += 1;
+    }
+}
+
+static void row_draw(yed_event *event) {
+    yed_attrs       *attr;
+    yed_attrs        new_attr;
+    int              loc;
+    yed_buffer_ptr_t buff_1;
+    yed_buffer_ptr_t buff_2;
+    buff_1      = NULL;
+    buff_2      = NULL;
+    map<string, diff_buff>::iterator d_buffers_it_1;
+    map<string, diff_buff>::iterator d_buffers_it_2;
+    char tmp_buff_a[512];
+    char tmp_buff_b[512];
+
+    if (d_buffers.size() == 0) {
+        return;
+    }
+
+    if (event->frame         == NULL
+    ||  event->frame->buffer == NULL) {
+        return;
+    }
+
+    for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
+        if (d_buffers_it->second.buff_num == LEFT) {
+            buff_1 = d_buffers_it->second.buff;
+            d_buffers_it_1 = d_buffers_it;
+        }else if (d_buffers_it->second.buff_num == RIGHT) {
+            buff_2 = d_buffers_it->second.buff;
+            d_buffers_it_2 = d_buffers_it;
+        }
+    }
+
+    if (buff_1 == NULL) {
+        yed_cerr("Couldn't find the first diff buffer.");
+        return;
+    }else if (buff_2 == NULL) {
+        yed_cerr("Couldn't find the second diff buffer.");
+        return;
+    }
+
+    yed_attrs attr_tmp;
+    yed_line  *line;
+
+    snprintf(tmp_buff_a, 512, "*%s", d_buffers_it_1->first.c_str());
+    snprintf(tmp_buff_b, 512, "*%s", d_buffers_it_2->first.c_str());
+
+    if (strcmp(event->frame->buffer->name, tmp_buff_a) == 0) {
+        if (color_diff[event->row].line_type == INS) {
+            attr_tmp = yed_parse_attrs("&active &cyan swap"); //blue
+        } else if (color_diff[event->row].line_type == DEL) {
+            attr_tmp = yed_parse_attrs("&active &blue swap"); //red
+        } else if (color_diff[event->row].line_type == CHG) {
+            attr_tmp = yed_parse_attrs("&active &magenta swap");
+        } else {
+            return;
+        }
+
+        line = yed_buff_get_line(event->frame->buffer, event->row);
+        if (line == NULL) { return; }
+
+        event->row_base_attr = attr_tmp;
+
+    }else if (strcmp(event->frame->buffer->name, tmp_buff_b) == 0) {
+        if (color_diff[event->row].line_type == INS) {
+            attr_tmp = yed_parse_attrs("&active &blue swap"); //green
+        } else if (color_diff[event->row].line_type == DEL) {
+            attr_tmp = yed_parse_attrs("&active &cyan swap"); //blue
+        } else if (color_diff[event->row].line_type == CHG) {
+            attr_tmp = yed_parse_attrs("&active &magenta swap");
+        } else {
+            return;
+        }
+
+        line = yed_buff_get_line(event->frame->buffer, event->row);
+        if (line == NULL) { return; }
+
+        event->row_base_attr = attr_tmp;
+    }
+}
 
 static void line_draw(yed_event *event) {
 //     yed_attrs       *attr;
@@ -508,226 +637,4 @@ static void line_draw(yed_event *event) {
 //             yed_eline_set_col_attrs(event, loc, attr_tmp);
 //         }
 //     }
-}
-
-static void row_draw(yed_event *event) {
-    yed_attrs       *attr;
-    yed_attrs        new_attr;
-    int              loc;
-    yed_buffer_ptr_t buff_1;
-    yed_buffer_ptr_t buff_2;
-    buff_1      = NULL;
-    buff_2      = NULL;
-    map<string, diff_buff>::iterator d_buffers_it_1;
-    map<string, diff_buff>::iterator d_buffers_it_2;
-    char tmp_buff_a[512];
-    char tmp_buff_b[512];
-
-    if (d_buffers.size() == 0) {
-        return;
-    }
-
-    if (event->frame         == NULL
-    ||  event->frame->buffer == NULL) {
-        return;
-    }
-
-    for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
-        if (d_buffers_it->second.buff_num == LEFT) {
-            buff_1 = d_buffers_it->second.buff;
-            d_buffers_it_1 = d_buffers_it;
-        }else if (d_buffers_it->second.buff_num == RIGHT) {
-            buff_2 = d_buffers_it->second.buff;
-            d_buffers_it_2 = d_buffers_it;
-        }
-    }
-
-    if (buff_1 == NULL) {
-        yed_cerr("Couldn't find the first diff buffer.");
-        return;
-    }else if (buff_2 == NULL) {
-        yed_cerr("Couldn't find the second diff buffer.");
-        return;
-    }
-
-    yed_attrs attr_tmp;
-    yed_line  *line;
-
-    snprintf(tmp_buff_a, 512, "*%s", d_buffers_it_1->first.c_str());
-    snprintf(tmp_buff_b, 512, "*%s", d_buffers_it_2->first.c_str());
-
-    if (strcmp(event->frame->buffer->name, tmp_buff_a) == 0) {
-        if (color_diff[event->row] == INS) {
-            attr_tmp = yed_parse_attrs("&active &blue swap");
-        } else if (color_diff[event->row] == DEL) {
-            attr_tmp = yed_parse_attrs("&active &red swap");
-        } else if (color_diff[event->row] == EQL) {
-//             attr_tmp = yed_parse_attrs("&active &blue swap");
-            return;
-        } else {
-            return;
-        }
-
-        line = yed_buff_get_line(event->frame->buffer, event->row);
-        if (line == NULL) { return; }
-
-        event->row_base_attr = attr_tmp;
-
-    }else if (strcmp(event->frame->buffer->name, tmp_buff_b) == 0) {
-        if (color_diff[event->row] == INS) {
-            attr_tmp = yed_parse_attrs("&active &green swap");
-        } else if (color_diff[event->row] == DEL) {
-            attr_tmp = yed_parse_attrs("&active &blue swap");
-        } else if (color_diff[event->row] == EQL) {
-//             attr_tmp = yed_parse_attrs("&active &blue swap");
-            return;
-        } else {
-            return;
-        }
-
-        line = yed_buff_get_line(event->frame->buffer, event->row);
-        if (line == NULL) { return; }
-
-        event->row_base_attr = attr_tmp;
-    }
-}
-
-int diff_completion_multiple(char *name, struct yed_completion_results_t *comp_res) {
-    char *tmp[2] = {"file", "diff-compl"};
-    return yed_complete_multiple(2, tmp, name, comp_res);
-}
-
-int diff_completion(char *name, struct yed_completion_results_t *comp_res) {
-    int                                          ret;
-    array_t                                      list;
-    char                                        *tmp;
-    char                                         loc[256];
-    tree_it(yed_buffer_name_t, yed_buffer_ptr_t) buffers_it;
-
-    ret = 0;
-    list = array_make(char *);
-
-    tree_traverse(ys->buffers, buffers_it) {
-        if (tree_it_val(buffers_it)->kind == BUFF_KIND_FILE &&
-            tree_it_val(buffers_it)->flags != BUFF_SPECIAL) {
-
-            array_push(list, tree_it_key(buffers_it));
-        }
-    }
-
-    FN_BODY_FOR_COMPLETE_FROM_ARRAY(name, array_len(list), (char **)array_data(list), comp_res, ret);
-    array_free(list);
-    return ret;
-}
-
-static void unload(yed_plugin *self) {
-}
-
-static void update_diff_buffer(yed_buffer_ptr_t buff, diff_buff &d_buff) {
-    yed_line *line;
-    int       row;
-
-    yed_buff_clear_no_undo(buff);
-
-    row = 1;
-    bucket_array_traverse(d_buff.buff->lines, line) {
-        yed_buffer_add_line_no_undo(buff);
-        yed_buff_set_line_no_undo(buff, row, line);
-        row += 1;
-    }
-}
-
-static void clear_buffers(char* b1, char* b2, char* b3, char* b4) {
-    char        tmp_buff[512];
-    yed_buffer *buffer;
-
-    buffer = yed_get_buffer(b1);
-    if (buffer != NULL) {
-        yed_free_buffer(buffer);
-    }
-
-    buffer = yed_get_buffer(b2);
-    if (buffer != NULL) {
-        yed_free_buffer(buffer);
-    }
-
-    buffer = yed_get_buffer(b3);
-    if (buffer != NULL) {
-        yed_free_buffer(buffer);
-    }
-
-    buffer = yed_get_buffer(b4);
-    if (buffer != NULL) {
-        yed_free_buffer(buffer);
-    }
-
-    d_buffers.clear();
-}
-
-static void get_or_make_buffers(char *buff_1, char *buff_2) {
-    char                                         tmp_buff[512];
-    char                                         buff[512];
-    char                                        *check_buff;
-    yed_line                                    *line;
-    yed_buffer                                  *buffer;
-    tree_it(yed_buffer_name_t, yed_buffer_ptr_t) buffers_it;
-
-    buffers_it = tree_lookup(ys->buffers, buff_1);
-    if (!tree_it_good(buffers_it)) {
-        YEXE("buffer-hidden", buff_1);
-    }
-
-    buffers_it = tree_lookup(ys->buffers, buff_2);
-    if (!tree_it_good(buffers_it)) {
-        YEXE("buffer-hidden", buff_2);
-    }
-
-    tree_traverse(ys->buffers, buffers_it) {
-        if (tree_it_val(buffers_it)->kind == BUFF_KIND_FILE &&
-            tree_it_val(buffers_it)->flags != BUFF_SPECIAL) {
-
-            check_buff = tree_it_key(buffers_it);
-            if (strcmp(buff_1, check_buff) == 0) {
-                snprintf(buff, 512, "diff:%s", check_buff);
-                d_buffers_it = d_buffers.emplace(string(buff), diff_buff{}).first;
-                d_buffers_it->second.buff_name = string(check_buff);
-                d_buffers_it->second.buff      = tree_it_val(buffers_it);
-                d_buffers_it->second.buff_num  = LEFT;
-//                 d_buffers_it->second.lines     = vector<buffer_line>();
-
-//                 vector<string> tmp_s_lines;
-//                 bucket_array_traverse(d_buffers_it->second.buff->lines, line) {
-//                     string tmp((char *)line->chars.data);
-//                     tmp_s_lines.push_back(tmp);
-//                 }
-//                 d_buffers_it->second.s_lines   = tmp_s_lines;
-
-            }else if (strcmp(buff_2, check_buff) == 0) {
-                snprintf(buff, 512, "diff:%s", check_buff);
-                d_buffers_it = d_buffers.emplace(string(buff), diff_buff{}).first;
-                d_buffers_it->second.buff_name = string(check_buff);
-                d_buffers_it->second.buff      = tree_it_val(buffers_it);
-                d_buffers_it->second.buff_num  = RIGHT;
-//                 d_buffers_it->second.lines     = vector<buffer_line>();
-//                 vector<string> tmp_s_lines;
-//                 bucket_array_traverse(d_buffers_it->second.buff->lines, line) {
-//                     string tmp((char *)line->chars.data);
-//                     tmp_s_lines.push_back(tmp);
-//                 }
-//                 d_buffers_it->second.s_lines   = tmp_s_lines;
-            }
-        }
-    }
-
-    for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
-        snprintf(tmp_buff, 512, "*%s", d_buffers_it->first.c_str());
-        buffer = yed_get_buffer(tmp_buff);
-
-        if (buffer == NULL) {
-            buffer = yed_create_buffer(tmp_buff);
-            buffer->flags |= BUFF_SPECIAL;
-        }
-
-        update_diff_buffer(buffer, d_buffers_it->second);
-    }
 }
