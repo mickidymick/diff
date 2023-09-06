@@ -554,10 +554,13 @@ static vector<int> color_line(int loc) {
             for (int c = 0; c < tmp_l_diff.size(); c++) {
                 if (tmp_l_diff[c].type == INS) {
                     tmp_line_color.push_back(INS);
+                    DBG("col:%d INS", c);
                 } else if (tmp_l_diff[c].type == DEL) {
                     tmp_line_color.push_back(DEL);
+                    DBG("col:%d DEL", c);
                 } else {
                     tmp_line_color.push_back(EQL);
+                    DBG("col:%d EQL", c);
                 }
             }
         }
