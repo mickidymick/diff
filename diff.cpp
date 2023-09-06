@@ -93,6 +93,7 @@ static void clear_buffers(char* b1, char* b2, char* b3, char* b4);
 static void diff(int n_args, char **args);
 static int  init(void);
 static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_buff buff_2);
+static vector<int> color_line(int loc);
 static void update_diff_buffer(yed_buffer_ptr_t buff, diff_buff &d_buff);
 static void row_draw(yed_event *event);
 static void line_draw(yed_event *event);
@@ -280,9 +281,9 @@ static void diff(int n_args, char **args) {
     l_diff.clear();
 
     Myers<vector<string>> myers(buffer_a.lines, buffer_a.num_lines, buffer_b.lines, buffer_b.num_lines);
-    int err = myers.diff();
+    l_diff = myers.diff();
 
-    if (err) {
+    if (l_diff.size() == 0) {
         return;
     }
 
@@ -377,29 +378,18 @@ static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_bu
             snprintf(tmp_buff, 512, "*diff:%s", buff_1.buff->name);
             buff = yed_get_buffer(tmp_buff);
             if (buff != NULL) {
-                DBG("%d: INS\n", i+1);
+//                 DBG("row:%d INS\n", i+1);
                 add++;
-
-//                 vector<string> tmp_1;
-//                 for (int c = 0; c < buffer_a.lines[i].size(); c++) {
-//                     tmp_1.push_back(string(1, buffer_a.lines[i][c]));
-//                 }
-//                 vector<string> tmp_2;
-//                 for (int c = 0; c < buffer_b.lines[i].size(); c++) {
-//                     tmp_2.push_back(string(1, buffer_b.lines[i][c]));
-//                 }
-//                 Myers<vector<string>> myers_r(tmp_1, tmp_1.size(), tmp_2, tmp_2.size());
-//                 int err = myers_r.diff();
             }
         } else if (l_diff[i].type == DEL) {
             snprintf(tmp_buff, 512, "*diff:%s", buff_2.buff->name);
             buff = yed_get_buffer(tmp_buff);
             if (buff != NULL) {
-                DBG("%d: DEL\n", i+1);
+//                 DBG("row:%d DEL\n", i+1);
                 sub++;
             }
         } else {
-            DBG("%d: EQL\n", i+1);
+//             DBG("row:%d EQL\n", i+1);
             if (i > 0) {
                 tmp_i = i - 1;
             } else {
@@ -414,8 +404,9 @@ static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_bu
                     for (int j = 0; j < add; j++) {
                         line_color line2;
                         line2.line_type = CHG;
+                        line2.char_type = color_line(l_diff[tmp_i].b_num + b);
                         color_diff.push_back(line2);
-                        DBG("%d:   CHG\n", tmp_i);
+                        DBG("row:%d   1 CHG size:%d\n", tmp_i, line2.char_type.size());
                         wierd = 1;
                     }
                 }
@@ -434,7 +425,7 @@ static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_bu
                             yed_buff_insert_line_no_undo(buff, l_diff[tmp_i].b_num + b);
                             yed_buff_insert_string(buff, dashes, l_diff[tmp_i].b_num + b, 1);
                         }
-                        DBG("%d:   DEL b:%d row:%d f:%d\n", tmp_i, b, l_diff[tmp_i].b_num, l_diff[tmp_i].b_num + b);
+//                         DBG("row:%d   DEL\n", l_diff[tmp_i].b_num + b);
                         b++;
                         line2.line_type = DEL;
                         color_diff.push_back(line2);
@@ -445,8 +436,10 @@ static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_bu
                     for (int j = 0; j < sub; j++) {
                         line_color line2;
                         line2.line_type = CHG;
+//                         line2.char_type = color_line(l_diff[tmp_i].a_num + a + 1 + j);
+                        line2.char_type = color_line(l_diff[tmp_i].a_num + a);
                         color_diff.push_back(line2);
-                        DBG("%d:   CHG\n", tmp_i);
+//                         DBG("row:%d   2 CHG size:%d\n", l_diff[tmp_i].a_num + a, line2.char_type.size());
                         wierd = 1;
                     }
                 }
@@ -465,7 +458,7 @@ static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_bu
                             yed_buff_insert_line_no_undo(buff, l_diff[tmp_i].a_num + a);
                             yed_buff_insert_string(buff, dashes, l_diff[tmp_i].a_num + a, 1);
                         }
-                        DBG("%d:   INS a:%d row:%d f:%d\n", tmp_i, a, l_diff[tmp_i].a_num, l_diff[tmp_i].a_num + a);
+//                         DBG("row:%d   INS\n", l_diff[tmp_i].a_num + a);
                         a++;
                         line2.line_type = INS;
                         color_diff.push_back(line2);
@@ -475,8 +468,10 @@ static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_bu
                 for (int j = 0; j < add; j++) {
                     line_color line2;
                     line2.line_type = CHG;
+//                     line2.char_type = color_line(l_diff[tmp_i].a_num + a + 1);
+                        line2.char_type = color_line(l_diff[tmp_i].a_num + a);
                     color_diff.push_back(line2);
-                    DBG("%d:   CHG\n", tmp_i);
+//                     DBG("row:%d   3 CHG\n", l_diff[tmp_i].a_num + a, line2.char_type.size());
                 }
             }
 
@@ -488,6 +483,87 @@ static void align_buffers(Myers<vector<string>> myers, diff_buff buff_1, diff_bu
             wierd = 0;
         }
     }
+}
+
+static vector<int> color_line(int loc) {
+    vector<int> tmp_line_color;
+
+    yed_buffer_ptr_t buff_1;
+    yed_buffer_ptr_t buff_2;
+    yed_buffer_ptr_t buff_3;
+    yed_buffer_ptr_t buff_4;
+    map<string, diff_buff>::iterator d_buffers_it_1;
+    map<string, diff_buff>::iterator d_buffers_it_2;
+    tree_it(yed_buffer_name_t, yed_buffer_ptr_t) buffers_it;
+    char                                        *check_buff;
+    char                                         buff_n1[512];
+    char                                         buff_n2[512];
+
+    for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
+        if (d_buffers_it->second.buff_num == LEFT) {
+            buff_1 = d_buffers_it->second.buff;
+            d_buffers_it_1 = d_buffers_it;
+        }else if (d_buffers_it->second.buff_num == RIGHT) {
+            buff_2 = d_buffers_it->second.buff;
+            d_buffers_it_2 = d_buffers_it;
+        }
+    }
+
+    if (buff_1 == NULL) {
+        yed_cerr("Couldn't find the first diff buffer.");
+        return tmp_line_color;
+    }else if (buff_2 == NULL) {
+        yed_cerr("Couldn't find the second diff buffer.");
+        return tmp_line_color;
+    }
+
+    int first = 0;
+    int second = 0;
+    tree_traverse(ys->buffers, buffers_it) {
+            check_buff = tree_it_key(buffers_it);
+            snprintf(buff_n1, 512, "*diff:%s", buff_1->name);
+            snprintf(buff_n2, 512, "*diff:%s", buff_2->name);
+
+            if (strcmp(check_buff, buff_n1) == 0) {
+                buff_3 = tree_it_val(buffers_it);
+                first = 1;
+            }else if (strcmp(check_buff, buff_n2) == 0) {
+                buff_4 = tree_it_val(buffers_it);
+                second = 1;
+            }
+        if (first && second) {
+            break;
+        }
+    }
+
+    if (buff_3->last_cursor_row < loc && buff_4->last_cursor_row < loc) {
+        DBG("%d", loc);
+        DBG("%s", yed_get_line_text(buff_3, loc));
+        DBG("%s", yed_get_line_text(buff_4, loc));
+        char *left  = yed_get_line_text(buff_3, loc);
+        int   left_len = array_len(yed_buff_get_line(buff_3, loc)->chars);
+        char *right = yed_get_line_text(buff_4, loc);
+        int   right_len = array_len(yed_buff_get_line(buff_4, loc)->chars);
+        DBG("left size:%d", left_len);
+        DBG("right size:%d", right_len);
+        Myers<string> myers_r(left, left_len, right, right_len);
+        vector<Line_diff> tmp_l_diff = myers_r.diff();
+        DBG("%d", tmp_l_diff.size());
+
+        if (tmp_l_diff.size() > 0) {
+            for (int c = 0; c < tmp_l_diff.size(); c++) {
+                if (tmp_l_diff[c].type == INS) {
+                    tmp_line_color.push_back(INS);
+                } else if (tmp_l_diff[c].type == DEL) {
+                    tmp_line_color.push_back(DEL);
+                } else {
+                    tmp_line_color.push_back(EQL);
+                }
+            }
+        }
+    }
+
+    return tmp_line_color;
 }
 
 static void update_diff_buffer(yed_buffer_ptr_t buff, diff_buff &d_buff) {
@@ -585,65 +661,91 @@ static void row_draw(yed_event *event) {
 }
 
 static void line_draw(yed_event *event) {
-//     yed_attrs       *attr;
-//     yed_attrs        new_attr;
-//     int              loc;
-//     yed_buffer_ptr_t buff_1;
-//     yed_buffer_ptr_t buff_2;
-//     buff_1      = NULL;
-//     buff_2      = NULL;
-//     map<string, diff_buff>::iterator d_buffers_it_1;
-//     map<string, diff_buff>::iterator d_buffers_it_2;
-//     char tmp_buff[512];
+    yed_attrs       *attr;
+    yed_attrs        new_attr;
+    int              loc;
+    yed_buffer_ptr_t buff_1;
+    yed_buffer_ptr_t buff_2;
+    buff_1      = NULL;
+    buff_2      = NULL;
+    map<string, diff_buff>::iterator d_buffers_it_1;
+    map<string, diff_buff>::iterator d_buffers_it_2;
+    char tmp_buff_a[512];
+    char tmp_buff_b[512];
 
-//     if (d_buffers.size() == 0) {
-//         return;
-//     }
+    if (d_buffers.size() == 0) {
+        return;
+    }
 
-//     if (event->frame         == NULL
-//     ||  event->frame->buffer == NULL) {
-//         return;
-//     }
+    if (event->frame         == NULL
+    ||  event->frame->buffer == NULL) {
+        return;
+    }
 
-//     for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
-//         if (d_buffers_it->second.buff_num == LEFT) {
-//             buff_1 = d_buffers_it->second.buff;
-//             d_buffers_it_1 = d_buffers_it;
-//         }else if (d_buffers_it->second.buff_num == RIGHT) {
-//             buff_2 = d_buffers_it->second.buff;
-//             d_buffers_it_2 = d_buffers_it;
-//         }
-//     }
+    for(d_buffers_it = d_buffers.begin(); d_buffers_it != d_buffers.end(); d_buffers_it++) {
+        if (d_buffers_it->second.buff_num == LEFT) {
+            buff_1 = d_buffers_it->second.buff;
+            d_buffers_it_1 = d_buffers_it;
+        }else if (d_buffers_it->second.buff_num == RIGHT) {
+            buff_2 = d_buffers_it->second.buff;
+            d_buffers_it_2 = d_buffers_it;
+        }
+    }
 
-//     if (buff_1 == NULL) {
-//         yed_cerr("Couldn't find the first diff buffer.");
-//         return;
-//     }else if (buff_2 == NULL) {
-//         yed_cerr("Couldn't find the second diff buffer.");
-//         return;
-//     }
+    if (buff_1 == NULL) {
+        yed_cerr("Couldn't find the first diff buffer.");
+        return;
+    }else if (buff_2 == NULL) {
+        yed_cerr("Couldn't find the second diff buffer.");
+        return;
+    }
 
-//     snprintf(tmp_buff, 512, "*%s", d_buffers_it_1->first.c_str());
+    yed_attrs attr_tmp;
+    yed_line  *line;
 
-//     yed_attrs *attr_tmp;
-//     yed_line  *line;
+    snprintf(tmp_buff_a, 512, "*%s", d_buffers_it_1->first.c_str());
+    snprintf(tmp_buff_b, 512, "*%s", d_buffers_it_2->first.c_str());
 
-//     if (strcmp(event->frame->buffer->name, tmp_buff) == 0) {
-//         if (type_arr[event->row].a == INS) {
-//             attr_tmp = &yed_parse_attrs("bg &green");
-//         } else if (type_arr[event->row].a == DEL) {
-//             attr_tmp = &yed_parse_attrs("&red.bg");
-//         } else if (type_arr[event->row].a == EQL) {
-//             attr_tmp = &yed_parse_attrs("bg &blue");
-//         }
+    if (strcmp(event->frame->buffer->name, tmp_buff_a) == 0) {
+        if (color_diff[event->row].line_type == CHG) {
+            line = yed_buff_get_line(event->frame->buffer, event->row);
 
-//         line = yed_buff_get_line(event->frame->buffer, event->row);
-//         if (line == NULL) { return; }
+            if (line == NULL) { return; }
 
-//         for (int loc = 1; loc <= line->visual_width; loc += 1) {
-//             yed_eline_set_col_attrs(event, loc, attr_tmp);
-//         }
-//     }
+            for (loc = 1; loc <= line->visual_width; loc += 1) {
+//                 DBG("color diff len:%d", color_diff[event->row].char_type.size());
+                if (color_diff[event->row].char_type.size() < loc) {
+                    return;
+                }
+
+                if (color_diff[event->row].char_type[loc] == DEL) {
+                    attr_tmp = yed_parse_attrs("&active &red swap");
+//                     DBG("red r:%d c:%d\n", event->row, loc);
+                    yed_eline_combine_col_attrs(event, loc, &attr_tmp);
+                }
+            }
+        }
+
+    } else if (strcmp(event->frame->buffer->name, tmp_buff_b) == 0) {
+        if (color_diff[event->row].line_type == CHG) {
+            line = yed_buff_get_line(event->frame->buffer, event->row);
+
+            if (line == NULL) { return; }
+
+            for (loc = 1; loc <= line->visual_width; loc += 1) {
+//                 DBG("color diff len:%d", color_diff[event->row].char_type.size());
+                if (color_diff[event->row].char_type.size() < loc) {
+                    return;
+                }
+
+                if (color_diff[event->row].char_type[loc] == INS) {
+                    attr_tmp = yed_parse_attrs("&active &red swap");
+//                     DBG("red r:%d c:%d\n", event->row, loc);
+                    yed_eline_combine_col_attrs(event, loc, &attr_tmp);
+                }
+            }
+        }
+    }
 }
 
 static void cursor_move(yed_event *event) {

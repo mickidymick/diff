@@ -8,11 +8,12 @@ extern "C" {
 template <class T>
 class Myers {
     public:
-        T   a;
-        int len_a;
-        T   b;
-        int len_b;
-        int max;
+        T                 a;
+        int               len_a;
+        T                 b;
+        int               len_b;
+        int               max;
+        vector<Line_diff> l_diff_tmp;
 
         Myers(T a_t, int len_a_t, T b_t, int len_b_t) {
             a     = a_t;
@@ -91,15 +92,15 @@ class Myers {
 
             if (x == prev_x) {
                 Line_diff tmp_line_diff(INS, prev_x + 1, "", prev_y + 1, b_line);
-                l_diff.insert(l_diff.begin(), tmp_line_diff);
+                l_diff_tmp.insert(l_diff_tmp.begin(), tmp_line_diff);
                 type_arr[prev_y + 1].b = INS;
             } else if (y == prev_y) {
                 Line_diff tmp_line_diff(DEL, prev_x + 1, a_line, prev_y + 1, "");
-                l_diff.insert(l_diff.begin(), tmp_line_diff);
+                l_diff_tmp.insert(l_diff_tmp.begin(), tmp_line_diff);
                 type_arr[prev_x + 1].a = DEL;
             } else {
                 Line_diff tmp_line_diff(EQL, prev_x + 1, a_line, prev_y + 1, b_line);
-                l_diff.insert(l_diff.begin(), tmp_line_diff);
+                l_diff_tmp.insert(l_diff_tmp.begin(), tmp_line_diff);
                 type_arr[prev_x + 1].a = EQL;
                 type_arr[prev_y + 1].b = EQL;
             }
@@ -147,13 +148,15 @@ class Myers {
         }
 
         //Main diff func
-        int diff(void) {
+        vector<Line_diff> diff(void) {
 
             vector<vector<int>> se = shortest_edit();
 
+            DBG("selen:%d", se.size());
+
             backtrack(se, len_a, len_b);
 
-            return 0;
+            return l_diff_tmp;
         }
 };
 
