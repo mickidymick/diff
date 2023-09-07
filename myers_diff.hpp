@@ -9,16 +9,16 @@ template <class T>
 class Myers {
     public:
         T                 a;
-        int               len_a;
         T                 b;
+        int               len_a;
         int               len_b;
         int               max;
-        vector<Line_diff> l_diff_tmp;
+        vector<file_diff> f_diff;
 
         Myers(T a_t, int len_a_t, T b_t, int len_b_t) {
             a     = a_t;
-            len_a = len_a_t;
             b     = b_t;
+            len_a = len_a_t;
             len_b = len_b_t;
             max   = len_a + len_b;
         }
@@ -34,27 +34,24 @@ class Myers {
 
         //Finds the Shortest Edit Path
         vector<vector<int>> shortest_edit(void) {
-            int tmp_k;
-            int tmp_k_add;
-            int tmp_k_min;
-            int x;
-            int y;
-            int size;
+            int                 x;
+            int                 y;
+            int                 size;
+            int                 tot;
+            vector<vector<int>> trace;
 
             size = 2 * max + 1;
-            type_arr.resize(size);
 
             vector<int> v(2 * max + 1);
             v[1] = 0;
-            vector<vector<int>> trace;
-
-            int tot = 0;
+            tot  = 0;
 
             for(int d = 0; d <= max; d++) {
                 trace.push_back(v);
                 tot++;
                 for(int k = -d; k <= d; k+=2) {
-                    if (k == -d || (k != d && v[wrap_indx(size, k - 1)] < v[wrap_indx(size, k + 1)])) {
+                    if (k == -d || (k != d
+                        && v[wrap_indx(size, k - 1)] < v[wrap_indx(size, k + 1)])) {
                         x = v[wrap_indx(size, k + 1)];
                     } else {
                         x = v[wrap_indx(size, k - 1)] + 1;
@@ -62,17 +59,15 @@ class Myers {
 
                     y = x - k;
 
-                    while (x < len_a &&
-                           y < len_b &&
-                           a[x] == b[y]) {
+                    while (x < len_a && y < len_b && a[x] == b[y]) {
                                x++;
                                y++;
                     }
 
                     v[wrap_indx(size, k)] = x;
 
-                    if (x >= len_a &&
-                        y >= len_b) {
+                    if (x >= len_a
+                        && y >= len_b) {
                         return trace;
                     }
                 }
@@ -91,18 +86,14 @@ class Myers {
             }
 
             if (x == prev_x) {
-                Line_diff tmp_line_diff(INS, prev_x + 1, "", prev_y + 1, b_line);
-                l_diff_tmp.insert(l_diff_tmp.begin(), tmp_line_diff);
-                type_arr[prev_y + 1].b = INS;
+                file_diff tmp_line_diff(INS, prev_x + 1, "", INS, prev_y + 1, b_line);
+                f_diff.insert(f_diff.begin(), tmp_line_diff);
             } else if (y == prev_y) {
-                Line_diff tmp_line_diff(DEL, prev_x + 1, a_line, prev_y + 1, "");
-                l_diff_tmp.insert(l_diff_tmp.begin(), tmp_line_diff);
-                type_arr[prev_x + 1].a = DEL;
+                file_diff tmp_line_diff(DEL, prev_x + 1, a_line, DEL, prev_y + 1, "");
+                f_diff.insert(f_diff.begin(), tmp_line_diff);
             } else {
-                Line_diff tmp_line_diff(EQL, prev_x + 1, a_line, prev_y + 1, b_line);
-                l_diff_tmp.insert(l_diff_tmp.begin(), tmp_line_diff);
-                type_arr[prev_x + 1].a = EQL;
-                type_arr[prev_y + 1].b = EQL;
+                file_diff tmp_line_diff(EQL, prev_x + 1, a_line, EQL, prev_y + 1, b_line);
+                f_diff.insert(f_diff.begin(), tmp_line_diff);
             }
         }
 
@@ -122,8 +113,8 @@ class Myers {
                 v = trace[d];
                 k = x - y;
 
-                if ( k == -d ||
-                     (k != d && v[wrap_indx(size, k - 1)] < v[wrap_indx(size, k + 1)])) {
+                if ( k == -d || (k != d
+                    && v[wrap_indx(size, k - 1)] < v[wrap_indx(size, k + 1)])) {
                     prev_k = k + 1;
                 } else {
                     prev_k = k - 1;
@@ -148,15 +139,13 @@ class Myers {
         }
 
         //Main diff func
-        vector<Line_diff> diff(void) {
+        vector<file_diff> diff(void) {
 
             vector<vector<int>> se = shortest_edit();
 
-            DBG("selen:%d", se.size());
-
             backtrack(se, len_a, len_b);
 
-            return l_diff_tmp;
+            return f_diff;
         }
 };
 
