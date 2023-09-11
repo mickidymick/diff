@@ -66,6 +66,7 @@ typedef struct diff_main_t {
 diff_main diff_m;
 
 #include "myers_diff.hpp"
+#include "myers_linear_diff.hpp"
 
 //Base Yed Plugin Functions
 static int  get_or_make_buffers(char *buff_1, char *buff_2);
@@ -77,7 +78,7 @@ static void clear_buffers(char* b1, char* b2, char* b3, char* b4);
 //Diff Functions
 static void diff(int n_args, char **args);
 static int  init(void);
-static void align_buffers(Myers<vector<string>> myers, yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2);
+static void align_buffers(Myers_linear<vector<string>> myers, yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2);
 static line diff_adjacent_line(line tmp_line, int loc);
 static void update_diff_buffer(yed_buffer_ptr_t buff_orig, yed_buffer_ptr_t buff_diff);
 static void line_base_draw(yed_event *event);
@@ -216,10 +217,10 @@ static void clear_buffers(char* b1, char* b2, char* b3, char* b4) {
 }
 
 static void diff(int n_args, char **args) {
-    char                                 *buff_1;
-    char                                 *buff_2;
-    char                                  tmp_buff_1[512];
-    char                                  tmp_buff_2[512];
+    char *buff_1;
+    char *buff_2;
+    char  tmp_buff_1[512];
+    char  tmp_buff_2[512];
 
     if (n_args != 2) {
         yed_cerr("Expected 2 arguments, two buffer names");
@@ -249,8 +250,10 @@ static void diff(int n_args, char **args) {
         return;
     }
 
-    Myers<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+    Myers_linear<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
                                 diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
+//     Myers<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+//                                 diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
     diff_m.f_diff = myers.diff();
 
     if (diff_m.f_diff.size() == 0) {
