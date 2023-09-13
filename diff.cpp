@@ -359,7 +359,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
     init_line.line_type = INIT;
 
     diff_m.lines.clear();
-    diff_m.lines.push_back(init_line);
+    diff_m.lines.push_back(std::move(init_line));
 
     save_i          = 0;
     num_tmp_ins     = 0;
@@ -387,7 +387,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                     line tmp_line;
                     tmp_line.line_type = CHG;
                     tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - j);
-                    diff_m.lines.push_back(tmp_line);
+                    diff_m.lines.push_back(std::move(tmp_line));
 //                     DBG("row:%d   1 CHG", diff_m.f_diff[i].row_num[RIGHT] + right_added_row - j);
                 }
 
@@ -402,14 +402,14 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
 //                     DBG("row:%d   DEL", diff_m.f_diff[i].row_num[RIGHT] + right_added_row);
                     right_added_row++;
                     tmp_line.line_type = DEL;
-                    diff_m.lines.push_back(tmp_line);
+                    diff_m.lines.push_back(std::move(tmp_line));
                 }
             } else if (num_tmp_ins > num_tmp_del) {
                 for (int j = num_tmp_del; j > 0; j--) {
                     line tmp_line;
                     tmp_line.line_type = CHG;
                     tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[LEFT] + left_added_row - j);
-                    diff_m.lines.push_back(tmp_line);
+                    diff_m.lines.push_back(std::move(tmp_line));
 //                     DBG("row:%d   2 CHG", diff_m.f_diff[i].row_num[LEFT] + left_added_row - j);
                 }
 
@@ -424,21 +424,21 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
 //                     DBG("row:%d   INS", diff_m.f_diff[i].row_num[LEFT] + left_added_row);
                     left_added_row++;
                     tmp_line.line_type = INS;
-                    diff_m.lines.push_back(tmp_line);
+                    diff_m.lines.push_back(std::move(tmp_line));
                 }
             } else {
                 for (int j = num_tmp_ins; j > 0; j--) {
                     line tmp_line;
                     tmp_line.line_type = CHG;
                     tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[LEFT] + left_added_row - j);
-                    diff_m.lines.push_back(tmp_line);
+                    diff_m.lines.push_back(std::move(tmp_line));
 //                     DBG("row:%d   3 CHG", diff_m.f_diff[i].row_num[LEFT] + left_added_row - j);
                 }
             }
 
             line tmp_line;
             tmp_line.line_type = EQL;
-            diff_m.lines.push_back(tmp_line);
+            diff_m.lines.push_back(std::move(tmp_line));
 
             num_tmp_ins = 0;
             num_tmp_del = 0;
@@ -450,7 +450,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
             line tmp_line;
             tmp_line.line_type = CHG;
             tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - j);
-            diff_m.lines.push_back(tmp_line);
+            diff_m.lines.push_back(std::move(tmp_line));
 //             DBG("row:%d   1 CHG", diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - j);
         }
 
@@ -465,14 +465,14 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
 //             DBG("row:%d   DEL", diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row);
             right_added_row++;
             tmp_line.line_type = DEL;
-            diff_m.lines.push_back(tmp_line);
+            diff_m.lines.push_back(std::move(tmp_line));
         }
     } else if (num_tmp_ins > num_tmp_del) {
         for (int j = num_tmp_del; j > 0; j--) {
             line tmp_line;
             tmp_line.line_type = CHG;
             tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j);
-            diff_m.lines.push_back(tmp_line);
+            diff_m.lines.push_back(std::move(tmp_line));
 //             DBG("row:%d   2 CHG", diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j);
         }
 
@@ -487,14 +487,14 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
 //             DBG("row:%d   INS", diff_m.f_diff[save_i].row_num[LEFT] + left_added_row);
             left_added_row++;
             tmp_line.line_type = INS;
-            diff_m.lines.push_back(tmp_line);
+            diff_m.lines.push_back(std::move(tmp_line));
         }
     } else {
         for (int j = num_tmp_ins; j > 0; j--) {
             line tmp_line;
             tmp_line.line_type = CHG;
             tmp_line = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j);
-            diff_m.lines.push_back(tmp_line);
+            diff_m.lines.push_back(std::move(tmp_line));
 //             DBG("row:%d   3 CHG", diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j);
         }
     }
