@@ -22,6 +22,11 @@ do {                                                       \
 
 using namespace std;
 
+//time
+#include <ctime>
+#include <chrono>
+using namespace chrono;
+
 #define LEFT  (0)
 #define RIGHT (1)
 
@@ -36,15 +41,12 @@ class file_diff {
     public:
         int    type[2];
         int    row_num[2];
-        string line_s[2];
 
-        file_diff(int t_1, int row_1, string line_s_1, int t_2, int row_2, string line_s_2) {
+        file_diff(int t_1, int row_1, int t_2, int row_2) {
             type[0]    = t_1;
             type[1]    = t_2;
             row_num[0] = row_1;
             row_num[1] = row_2;
-            line_s[0]  = line_s_1;
-            line_s[1]  = line_s_2;
         }
 };
 
@@ -66,6 +68,7 @@ typedef struct diff_main_t {
 diff_main diff_m;
 
 #include "myers_diff.hpp"
+#include "myers_row_diff.hpp"
 #include "myers_linear_diff.hpp"
 
 //Base Yed Plugin Functions
@@ -268,6 +271,9 @@ static void diff(int n_args, char **args) {
         return;
     }
 
+    //time
+    high_resolution_clock::time_point t1 = high_resolution_clock::now();
+
     snprintf(tmp_buff_1, 512, "*diff:%s", buff_1);
     snprintf(tmp_buff_2, 512, "*diff:%s", buff_2);
 
@@ -285,7 +291,7 @@ static void diff(int n_args, char **args) {
 
     diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
     if (strcmp(diff_multi_line_var, "myers") == 0) {
-        DBG("myers");
+        DBG("myers_row");
         Myers<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         diff_m.f_diff = myers.diff();
@@ -311,6 +317,11 @@ static void diff(int n_args, char **args) {
     LOG_FN_ENTER();
     yed_log("%s, %s", buff_1, buff_2);
     LOG_EXIT();
+
+    high_resolution_clock::time_point t2 = high_resolution_clock::now();
+    duration<double> time_span = duration_cast<duration<double>>(t2 - t1);
+
+    DBG("time: %lf (seconds)", time_span.count());
 }
 
 static int init(void) {

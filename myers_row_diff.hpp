@@ -1,25 +1,19 @@
-#ifndef MyersDiff_HPP
-#define MyersDiff_HPP
+#ifndef MyersRowDiff_HPP
+#define MyersRowDiff_HPP
 
 extern "C" {
     #include <yed/plugin.h>
 }
 
-template <class T>
-class Myers {
+class Myers_row {
     public:
-        T                 a;
-        T                 b;
-        int               len_a;
-        int               len_b;
+        int               len[2];
         int               max;
         vector<file_diff> f_diff;
 
-        Myers(T a_t, int len_a_t, T b_t, int len_b_t) {
-            a     = a_t;
-            b     = b_t;
-            len_a = len_a_t;
-            len_b = len_b_t;
+        Myers_row(int len_a, int len_b) {
+            len[LEFT] = len_a;
+            len[RIGHT] = len_b;
             max   = len_a + len_b;
         }
 
@@ -59,15 +53,16 @@ class Myers {
 
                     y = x - k;
 
-                    while (x < len_a && y < len_b && a[x] == b[y]) {
+                    while (x < len[LEFT] && y < len[RIGHT]
+                    && (strcmp(yed_get_line_text(diff_m.buff_orig[LEFT], x - 1),  yed_get_line_text(diff_m.buff_orig[RIGHT], y - 1)) == 0)) {
                                x++;
                                y++;
                     }
 
                     v[wrap_indx(size, k)] = x;
 
-                    if (x >= len_a
-                        && y >= len_b) {
+                    if (x >= len[LEFT]
+                        && y >= len[RIGHT]) {
                         return trace;
                     }
                 }
@@ -75,16 +70,6 @@ class Myers {
         }
 
         void backtrack_yield(int prev_x, int prev_y, int x, int y) {
-            string a_line;
-            string b_line;
-
-            if (prev_x >= 0 && prev_x < len_a) {
-                a_line = a[prev_x];
-            }
-            if (prev_y >= 0 && prev_y < len_b) {
-                b_line = b[prev_y];
-            }
-
             if (x == prev_x) {
                 file_diff tmp_line_diff(INS, prev_x + 1, INS, prev_y + 1);
                 f_diff.insert(f_diff.begin(), tmp_line_diff);
@@ -143,7 +128,7 @@ class Myers {
 
             vector<vector<int>> se = shortest_edit();
 
-            backtrack(se, len_a, len_b);
+            backtrack(se, len[LEFT], len[RIGHT]);
 
             return f_diff;
         }
