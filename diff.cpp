@@ -78,7 +78,7 @@ static void clear_buffers(char* b1, char* b2, char* b3, char* b4);
 //Diff Functions
 static void diff(int n_args, char **args);
 static int  init(void);
-static void align_buffers(Myers_linear<vector<string>> myers, yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2);
+static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2);
 static line diff_adjacent_line(line tmp_line, int loc);
 static void update_diff_buffer(yed_buffer_ptr_t buff_orig, yed_buffer_ptr_t buff_diff);
 static void line_base_draw(yed_event *event);
@@ -112,6 +112,38 @@ extern "C" {
         yed_plugin_set_completion(self, "diff-compl", diff_completion);
         yed_plugin_set_completion(self, "diff-compl-arg-0", diff_completion_multiple);
         yed_plugin_set_completion(self, "diff-compl-arg-1", diff_completion_multiple);
+
+        if (yed_get_var("diff-multi-line-compare-algorithm") == NULL) {
+            yed_set_var("diff-multi-line-compare-algorithm", "myers");
+        }
+
+        if (yed_get_var("diff-line-compare-algorithm") == NULL) {
+            yed_set_var("diff-line-compare-algorithm", "myers");
+        }
+
+        if (yed_get_var("diff-insert-color") == NULL) {
+            yed_set_var("diff-insert-color", "&active &blue swap");
+        }
+
+        if (yed_get_var("diff-insert-dashes-color") == NULL) {
+            yed_set_var("diff-insert-dashes-color", "&active &cyan swap");
+        }
+
+        if (yed_get_var("diff-delete-color") == NULL) {
+            yed_set_var("diff-delete-color", "&active &blue swap");
+        }
+
+        if (yed_get_var("diff-delete-dashes-color") == NULL) {
+            yed_set_var("diff-delete-dashes-color", "&active &cyan swap");
+        }
+
+        if (yed_get_var("diff-inner-compare-color") == NULL) {
+            yed_set_var("diff-inner-compare-color", "&active &magenta swap");
+        }
+
+        if (yed_get_var("diff-inner-compare-char-color") == NULL) {
+            yed_set_var("diff-inner-compare-char-color", "&active &red swap");
+        }
 
         return 0;
     }
@@ -219,6 +251,7 @@ static void clear_buffers(char* b1, char* b2, char* b3, char* b4) {
 static void diff(int n_args, char **args) {
     char *buff_1;
     char *buff_2;
+    char *diff_multi_line_var;
     char  tmp_buff_1[512];
     char  tmp_buff_2[512];
 
@@ -250,11 +283,18 @@ static void diff(int n_args, char **args) {
         return;
     }
 
-    Myers_linear<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
-                                diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
-//     Myers<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
-//                                 diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
-    diff_m.f_diff = myers.diff();
+    diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
+    if (strcmp(diff_multi_line_var, "myers") == 0) {
+        DBG("myers");
+        Myers<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+                                    diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
+        diff_m.f_diff = myers.diff();
+    } else if (strcmp(diff_multi_line_var, "myers_linear") == 0) {
+        DBG("myers_linear");
+        Myers_linear<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+                                    diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
+        diff_m.f_diff = myers.diff();
+    }
 
     if (diff_m.f_diff.size() == 0) {
         yed_cerr("Files were the same!");
@@ -266,7 +306,7 @@ static void diff(int n_args, char **args) {
     YEXE("frame-vsplit");
     YEXE("buffer", diff_m.buff_diff[RIGHT]->name);
 
-    align_buffers(myers, diff_m.buff_diff[LEFT], diff_m.buff_diff[RIGHT]);
+    align_buffers(diff_m.buff_diff[LEFT], diff_m.buff_diff[RIGHT]);
 
     LOG_FN_ENTER();
     yed_log("%s, %s", buff_1, buff_2);
@@ -308,7 +348,7 @@ static int init(void) {
     return 0;
 }
 
-static void align_buffers(Myers<vector<string>> myers, yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
+static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
     line init_line;
     int  save_i;
     int  num_tmp_ins;
@@ -463,6 +503,7 @@ static void align_buffers(Myers<vector<string>> myers, yed_buffer_ptr_t buff_1, 
 static line diff_adjacent_line(line tmp_line, int loc) {
     char *left;
     char *right;
+    char *diff_multi_line_var;
     int   left_len;
     int   right_len;
     int   last_col_ins;
@@ -484,10 +525,18 @@ static line diff_adjacent_line(line tmp_line, int loc) {
         right_len = array_len(yed_buff_get_line(diff_m.buff_diff[RIGHT], loc)->chars);
 //         DBG("left size:%d", left_len);
 //         DBG("right size:%d", right_len);
-        Myers<string> myers_r(left, left_len, right, right_len);
-        vector<file_diff> tmp_file_diff = myers_r.diff();
-//         DBG("%d", tmp_file_diff.size());
 
+        vector<file_diff> tmp_file_diff;
+        diff_multi_line_var = yed_get_var("diff-line-compare-algorithm");
+        if (strcmp(diff_multi_line_var, "myers") == 0) {
+            Myers<string> myers_r(left, left_len, right, right_len);
+            tmp_file_diff = myers_r.diff();
+        } else if (strcmp(diff_multi_line_var, "myers_linear") == 0) {
+            Myers_linear<string> myers_r(left, left_len, right, right_len);
+            tmp_file_diff = myers_r.diff();
+        }
+
+//         DBG("%d", tmp_file_diff.size());
         tmp_line.col_begin[LEFT]  = 0;
         tmp_line.col_begin[RIGHT] = 0;
         tmp_line.col_end[LEFT]    = 0;
@@ -555,6 +604,7 @@ static void update_diff_buffer(yed_buffer_ptr_t buff_orig, yed_buffer_ptr_t buff
 
 static void line_base_draw(yed_event *event) {
     yed_line  *tmp_line;
+    char      *color_var;
     yed_attrs  tmp_attr;
 
     if (event->frame         == NULL
@@ -565,11 +615,17 @@ static void line_base_draw(yed_event *event) {
 
     if (event->frame->buffer == diff_m.buff_diff[LEFT]) {
         if (diff_m.lines[event->row].line_type == INS) {
-            tmp_attr = yed_parse_attrs("&active &cyan swap"); //blue
+            if ((color_var = yed_get_var("diff-insert-dashes-color"))) {
+                tmp_attr   = yed_parse_attrs(color_var);
+            }
         } else if (diff_m.lines[event->row].line_type == DEL) {
-            tmp_attr = yed_parse_attrs("&active &blue swap"); //red
+            if ((color_var = yed_get_var("diff-delete-color"))) {
+                tmp_attr   = yed_parse_attrs(color_var);
+            }
         } else if (diff_m.lines[event->row].line_type == CHG) {
-            tmp_attr = yed_parse_attrs("&active &magenta swap");
+            if ((color_var = yed_get_var("diff-inner-compare-color"))) {
+                tmp_attr   = yed_parse_attrs(color_var);
+            }
         } else {
             return;
         }
@@ -581,11 +637,17 @@ static void line_base_draw(yed_event *event) {
 
     }else if (event->frame->buffer == diff_m.buff_diff[RIGHT]) {
         if (diff_m.lines[event->row].line_type == INS) {
-            tmp_attr = yed_parse_attrs("&active &blue swap"); //green
+            if ((color_var = yed_get_var("diff-insert-color"))) {
+                tmp_attr   = yed_parse_attrs(color_var);
+            }
         } else if (diff_m.lines[event->row].line_type == DEL) {
-            tmp_attr = yed_parse_attrs("&active &cyan swap"); //blue
+            if ((color_var = yed_get_var("diff-delete-dashes-color"))) {
+                tmp_attr   = yed_parse_attrs(color_var);
+            }
         } else if (diff_m.lines[event->row].line_type == CHG) {
-            tmp_attr = yed_parse_attrs("&active &magenta swap");
+            if ((color_var = yed_get_var("diff-inner-compare-color"))) {
+                tmp_attr   = yed_parse_attrs(color_var);
+            }
         } else {
             return;
         }
@@ -599,6 +661,7 @@ static void line_base_draw(yed_event *event) {
 
 static void line_char_draw(yed_event *event) {
     yed_line  *tmp_line;
+    char      *color_var;
     yed_attrs  tmp_attr;
 
     if (event->frame         == NULL
@@ -622,7 +685,9 @@ static void line_char_draw(yed_event *event) {
 //                                             diff_m.lines[event->row].col_end[LEFT]);
                 if (col >= diff_m.lines[event->row].col_begin[LEFT]
                 && col <= diff_m.lines[event->row].col_end[LEFT]) {
-                    tmp_attr = yed_parse_attrs("&active &red swap");
+                    if ((color_var = yed_get_var("diff-inner-compare-char-color"))) {
+                        tmp_attr   = yed_parse_attrs(color_var);
+                    }
 //                     DBG("red r:%d c:%d\n", event->row, col);
                     yed_eline_combine_col_attrs(event, col, &tmp_attr);
                 }
@@ -642,7 +707,9 @@ static void line_char_draw(yed_event *event) {
 
                 if (col >= diff_m.lines[event->row].col_begin[RIGHT]
                 && col <= diff_m.lines[event->row].col_end[RIGHT]) {
-                    tmp_attr = yed_parse_attrs("&active &red swap");
+                    if ((color_var = yed_get_var("diff-inner-compare-char-color"))) {
+                        tmp_attr   = yed_parse_attrs(color_var);
+                    }
 //                     DBG("red r:%d c:%d\n", event->row, col);
                     yed_eline_combine_col_attrs(event, col, &tmp_attr);
                 }
