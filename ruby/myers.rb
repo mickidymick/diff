@@ -110,23 +110,12 @@ class MyersLinear
         (head || [start]) + (tail || [finish])
     end
 
-    def print_it(x1, y1, x2, y2)
-        if x1 == x2
-            print "ins #{x1} #{y1}\n"
-#             diff << Diff::Edit.new(:ins, nil, @b[y1])
-        elsif y1 == y2
-            print "del #{x1} #{y1}\n"
-#             diff << Diff::Edit.new(:del, @a[x1], nil)
-        else
-            print "eql #{x1} #{y1}\n"
-#             diff << Diff::Edit.new(:eql, @a[x1], @b[y1])
-        end
-    end
-
     def walk_diagonal(x1, y1, x2, y2, &block)
+        print "diag\n"
         while x1 < x2 and y1 < y2 and @a[x1] == @b[y1]
-#             yield x1, y1, x1 + 1, y1 + 1
-            print_it(x1, y1, x1 + 1, y1 + 1)
+            print "woo\n"
+            yield x1, y1, x1 + 1, y1 + 1
+#             print_it(x1, y1, x1 + 1, y1 + 1)
             x1, y1 = x1 + 1, y1 + 1
         end
         [x1, y1]
@@ -134,20 +123,20 @@ class MyersLinear
 
     def walk_snakes(&block)
         path = find_path(0, 0, @a.size, @b.size)
-        print path
+        print "#{path}\n"
         return unless path
 
         path.each_cons(2) do |(x1, y1), (x2, y2)|
+            print "\nx1:#{x1} y1:#{y1} x2:#{x2} y2:#{y2}\n"
             x1, y1 = walk_diagonal(x1, y1, x2, y2, &block)
 
+            print "x1:#{x1} y1:#{y1}\n"
             case x2 - x1 <=> y2 - y1
             when -1
-#                 yield x1, y1, x1, y1 + 1
-                print_it(x1, y1, x1, y1 + 1)
+                yield x1, y1, x1, y1 + 1
                 y1 += 1
             when 1
-#                 yield x1, y1, x1 + 1, y1
-                print_it(x1, y1, x1 + 1, y1)
+                yield x1, y1, x1 + 1, y1
                 x1 += 1
             end
 
@@ -160,11 +149,21 @@ class MyersLinear
 
         walk_snakes do |x1, y1, x2, y2|
             if x1 == x2
-                diff << Diff::Edit.new(:ins, nil, @b[y1])
+#                 diff << Diff::Edit.new(:ins, nil, @b[y1])
+                print "INS  #{y1 + 1}\n"
+#                 print @b[y1]
+#                 print "\n\n"
             elsif y1 == y2
-                diff << Diff::Edit.new(:del, @a[x1], nil)
+#                 diff << Diff::Edit.new(:del, @a[x1], nil)
+                print "DEL #{x1 + 1}\n"
+#                 print @a[x1]
+#                 print "\n\n"
             else
-                diff << Diff::Edit.new(:eql, @a[x1], @b[y1])
+#                 diff << Diff::Edit.new(:eql, @a[x1], @b[y1])
+                print "EQL #{x1 + 1} #{y1 + 1}\n"
+#                 print @a[x1]
+#                 print @b[y1]
+#                 print "\n\n"
             end
         end
 

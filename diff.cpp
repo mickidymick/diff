@@ -36,6 +36,7 @@ using namespace chrono;
 #define EQL   (3)
 #define CHG   (4)
 #define NUL   (5)
+#define TRUNC (7)
 
 class file_diff {
     public:
@@ -68,7 +69,6 @@ typedef struct diff_main_t {
 diff_main diff_m;
 
 #include "myers_diff.hpp"
-#include "myers_row_diff.hpp"
 #include "myers_linear_diff.hpp"
 
 //Base Yed Plugin Functions
@@ -81,6 +81,7 @@ static void clear_buffers(char* b1, char* b2, char* b3, char* b4);
 //Diff Functions
 static void diff(int n_args, char **args);
 static int  init(void);
+static int  truncate_lines(int num_cont_eql_rows, int last_eql_row);
 static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2);
 static line diff_adjacent_line(line tmp_line, int loc);
 static void update_diff_buffer(yed_buffer_ptr_t buff_orig, yed_buffer_ptr_t buff_diff);
@@ -146,6 +147,18 @@ extern "C" {
 
         if (yed_get_var("diff-inner-compare-char-color") == NULL) {
             yed_set_var("diff-inner-compare-char-color", "&active &red swap");
+        }
+
+        if (yed_get_var("diff-trunc-color") == NULL) {
+            yed_set_var("diff-trunc-color", "&active &cyan");
+        }
+
+        if (yed_get_var("diff-truncate-lines") == NULL) {
+            yed_set_var("diff-truncate-lines", "yes");
+        }
+
+        if (yed_get_var("diff-truncate-lines-min-num") == NULL) {
+            yed_set_var("diff-truncate-lines-min-num", XSTR(12));
         }
 
         return 0;
@@ -300,10 +313,6 @@ static void diff(int n_args, char **args) {
         Myers_linear<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         diff_m.f_diff = myers.diff();
-    } else if (strcmp(diff_multi_line_var, "myers_row") == 0) {
-        DBG("myers_row");
-        Myers_row myers(array_len(diff_m.buff_diff[LEFT]->lines), array_len(diff_m.buff_diff[RIGHT]->lines));
-        diff_m.f_diff = myers.diff();
     }
 
     if (diff_m.f_diff.size() == 0) {
@@ -335,7 +344,6 @@ static void diff(int n_args, char **args) {
 
 static int init(void) {
     yed_line *line;
-    char     *diff_multi_line_var;
     string    A;
     string    B;
 
@@ -347,26 +355,81 @@ static int init(void) {
         return 1;
     }
 
-    diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
-    if (strcmp(diff_multi_line_var, "myers") == 0 || strcmp(diff_multi_line_var, "myers_linear") == 0) {
-        diff_m.line_buff[LEFT].clear();
-        diff_m.line_buff[RIGHT].clear();
+    diff_m.line_buff[LEFT].clear();
+    diff_m.line_buff[RIGHT].clear();
 
-        bucket_array_traverse(diff_m.buff_orig[LEFT]->lines, line) {
-            array_zero_term(line->chars);
-            A.clear();
-            A.append((char *)(line->chars.data));
-            A.append("\n");
-            diff_m.line_buff[LEFT].push_back(A);
-        }
+    bucket_array_traverse(diff_m.buff_orig[LEFT]->lines, line) {
+        array_zero_term(line->chars);
+        A.clear();
+        A.append((char *)(line->chars.data));
+        A.append("\n");
+        diff_m.line_buff[LEFT].push_back(A);
+    }
 
-        bucket_array_traverse(diff_m.buff_orig[RIGHT]->lines, line) {
-            array_zero_term(line->chars);
-            B.clear();
-            B.append((char *)(line->chars.data));
-            B.append("\n");
-            diff_m.line_buff[RIGHT].push_back(B);
+    bucket_array_traverse(diff_m.buff_orig[RIGHT]->lines, line) {
+        array_zero_term(line->chars);
+        B.clear();
+        B.append((char *)(line->chars.data));
+        B.append("\n");
+        diff_m.line_buff[RIGHT].push_back(B);
+    }
+
+    return 0;
+}
+
+static int truncate_lines(int num_cont_eql_rows, int last_eql_row) {
+    int min_rows;
+
+    if (yed_var_is_truthy("diff-truncate-lines")) {
+        yed_get_var_as_int("diff-truncate-lines-min-num", &min_rows);
+        if (num_cont_eql_rows > min_rows + 1) {
+            DBG("top:     %d", last_eql_row - num_cont_eql_rows + 1);
+            DBG("truncate %d rows", num_cont_eql_rows - min_rows);
+            DBG("bottom:  %d", last_eql_row);
+
+            if (min_rows % 2 != 0) {
+                min_rows++;
+            }
+
+            for (int i = last_eql_row - (min_rows / 2); i > last_eql_row + num_cont_eql_rows - min_rows; i--) {
+                yed_buff_delete_line_no_undo(diff_m.buff_diff[LEFT], i);
+                yed_buff_delete_line_no_undo(diff_m.buff_diff[RIGHT], i);
+            }
+
+            char trunc_str[512];
+            char dashes[300];
+            memset(dashes, '-', 300);
+            snprintf(trunc_str, 50, "------ %d lines: char                 ", num_cont_eql_rows - min_rows);
+            strcat(trunc_str, dashes);
+            yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT], last_eql_row - num_cont_eql_rows + 1 + (min_rows / 2));
+            yed_buff_insert_string(diff_m.buff_diff[LEFT], trunc_str, last_eql_row - num_cont_eql_rows + 1 + (min_rows / 2), 1);
+            yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT], last_eql_row - num_cont_eql_rows + 1 + (min_rows / 2));
+            yed_buff_insert_string(diff_m.buff_diff[RIGHT], trunc_str, last_eql_row - num_cont_eql_rows + 1 + (min_rows / 2), 1);
+
+            for (int i = 0; i < min_rows / 2; i++) {
+                line tmp_line;
+                tmp_line.line_type = EQL;
+                diff_m.lines.push_back(tmp_line);
+            }
+
+            line tmp_line;
+            tmp_line.line_type = TRUNC;
+            diff_m.lines.push_back(tmp_line);
+
+            for (int i = 0; i < min_rows / 2; i++) {
+                line tmp_line;
+                tmp_line.line_type = EQL;
+                diff_m.lines.push_back(tmp_line);
+            }
+
+            return num_cont_eql_rows - min_rows;
         }
+    }
+
+    for (int i = 0; i < num_cont_eql_rows; i++) {
+        line tmp_line;
+        tmp_line.line_type = EQL;
+        diff_m.lines.push_back(std::move(tmp_line));
     }
 
     return 0;
@@ -379,17 +442,20 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
     int  num_tmp_del;
     int  left_added_row;
     int  right_added_row;
+    int  num_cont_eql_rows;
+    int  num_truncated_rows;
 
     init_line.line_type = INIT;
 
     diff_m.lines.clear();
     diff_m.lines.push_back(std::move(init_line));
 
-    save_i          = 0;
-    num_tmp_ins     = 0;
-    num_tmp_del     = 0;
-    left_added_row  = 0;
-    right_added_row = 0;
+    save_i            = 0;
+    num_tmp_ins       = 0;
+    num_tmp_del       = 0;
+    left_added_row    = 0;
+    right_added_row   = 0;
+    num_cont_eql_rows = 0;
     for (int i = 0; i < diff_m.f_diff.size(); i++) {
 
         if (diff_m.f_diff[i].type[LEFT] == INIT) {
@@ -400,9 +466,18 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
         if (diff_m.f_diff[i].type[RIGHT] == INS) {
 //             DBG("INS\n");
             num_tmp_ins++;
+
+            if (num_cont_eql_rows > 0) {
+                num_truncated_rows += truncate_lines(num_cont_eql_rows, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - 1);
+                num_cont_eql_rows   = 0;
+            }
         } else if (diff_m.f_diff[i].type[LEFT] == DEL) {
 //             DBG("DEL\n");
             num_tmp_del++;
+            if (num_cont_eql_rows > 0) {
+                num_truncated_rows += truncate_lines(num_cont_eql_rows, diff_m.f_diff[i].row_num[LEFT] + left_added_row - 1);
+                num_cont_eql_rows   = 0;
+            }
         } else {
 //             DBG("EQL\n");
 
@@ -460,9 +535,10 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                 }
             }
 
-            line tmp_line;
-            tmp_line.line_type = EQL;
-            diff_m.lines.push_back(std::move(tmp_line));
+//             line tmp_line;
+//             tmp_line.line_type = EQL;
+//             diff_m.lines.push_back(std::move(tmp_line));
+            num_cont_eql_rows++;
 
             num_tmp_ins = 0;
             num_tmp_del = 0;
@@ -527,7 +603,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
 static line diff_adjacent_line(line tmp_line, int loc) {
     char *left;
     char *right;
-    char *diff_multi_line_var;
+    char *diff_line_var;
     int   left_len;
     int   right_len;
     int   last_col_ins;
@@ -551,11 +627,11 @@ static line diff_adjacent_line(line tmp_line, int loc) {
 //         DBG("right size:%d", right_len);
 
         vector<file_diff> tmp_file_diff;
-        diff_multi_line_var = yed_get_var("diff-line-compare-algorithm");
-        if (strcmp(diff_multi_line_var, "myers") == 0) {
+        diff_line_var = yed_get_var("diff-line-compare-algorithm");
+        if (strcmp(diff_line_var, "myers") == 0) {
             Myers<string> myers_r(left, left_len, right, right_len);
             tmp_file_diff = myers_r.diff();
-        } else if (strcmp(diff_multi_line_var, "myers_linear") == 0) {
+        } else if (strcmp(diff_line_var, "myers_linear") == 0) {
             Myers_linear<string> myers_r(left, left_len, right, right_len);
             tmp_file_diff = myers_r.diff();
         }
@@ -650,6 +726,10 @@ static void line_base_draw(yed_event *event) {
             if ((color_var = yed_get_var("diff-inner-compare-color"))) {
                 tmp_attr   = yed_parse_attrs(color_var);
             }
+        } else if (diff_m.lines[event->row].line_type == TRUNC) {
+            if ((color_var = yed_get_var("diff-trunc-color"))) {
+                tmp_attr   = yed_parse_attrs(color_var);
+            }
         } else {
             return;
         }
@@ -670,6 +750,10 @@ static void line_base_draw(yed_event *event) {
             }
         } else if (diff_m.lines[event->row].line_type == CHG) {
             if ((color_var = yed_get_var("diff-inner-compare-color"))) {
+                tmp_attr   = yed_parse_attrs(color_var);
+            }
+        } else if (diff_m.lines[event->row].line_type == TRUNC) {
+            if ((color_var = yed_get_var("diff-trunc-color"))) {
                 tmp_attr   = yed_parse_attrs(color_var);
             }
         } else {

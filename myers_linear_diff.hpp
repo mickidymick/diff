@@ -232,19 +232,13 @@ class Myers_linear {
 
             if (x1 == x2) {
                 file_diff tmp_line_diff(INS, x1 + 1, INS, y1 + 1);
-//                 f_diff.insert(f_diff.begin(), tmp_line_diff);
                 f_diff.push_back(tmp_line_diff);
-                DBG("INS %d INS %d", x1 + 1, y1 + 1);
             } else if (y1 == y2) {
                 file_diff tmp_line_diff(DEL, x1 + 1, DEL, y1 + 1);
-//                 f_diff.insert(f_diff.begin(), tmp_line_diff);
                 f_diff.push_back(tmp_line_diff);
-                DBG("DEL %d DEL %d", x1 + 1, y1 + 1);
             } else {
                 file_diff tmp_line_diff(EQL, x1 + 1, EQL, y1 + 1);
-//                 f_diff.insert(f_diff.begin(), tmp_line_diff);
                 f_diff.push_back(tmp_line_diff);
-                DBG("EQL %d EQL %d", x1 + 1, y1 + 1);
             }
         }
 
@@ -277,11 +271,11 @@ class Myers_linear {
                 return f_diff;
             }
 
-            for (int i = 0; i < path.size(); i++) {
-                yed_log("[%d, %d]\n", path[i][0], path[i][1]);
-            }
+//             for (int i = 0; i < path.size(); i++) {
+//                 DBG("[%d, %d]", path[i][0], path[i][1]);
+//             }
 
-            for (int i = 0; i < path.size(); i+=2) {
+            for (int i = 0; i < path.size() - 1; i++) {
                 x1 = path[i][0];
                 y1 = path[i][1];
                 x2 = path[i+1][0];
@@ -302,7 +296,6 @@ class Myers_linear {
                 walk_diagonal(x1, y1, x2, y2, f_diff);
             }
 
-//             f_diff.clear();
             return f_diff;
         }
 };
