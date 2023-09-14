@@ -86,7 +86,7 @@ static line diff_adjacent_line(line tmp_line, int loc);
 static void update_diff_buffer(yed_buffer_ptr_t buff_orig, yed_buffer_ptr_t buff_diff);
 static void line_base_draw(yed_event *event);
 static void line_char_draw(yed_event *event);
-static void cursor_move(yed_event *event);
+static void frame_post_scroll(yed_event *event);
 
 extern "C" {
     int yed_plugin_boot(yed_plugin *self) {
@@ -104,11 +104,11 @@ extern "C" {
         line_char_draw_eh.fn   = line_char_draw;
         yed_plugin_add_event_handler(self, line_char_draw_eh);
 
-    /*     CURSOR_PRE_MOVE */
-        yed_event_handler cursor_move_eh;
-        cursor_move_eh.kind = EVENT_CURSOR_PRE_MOVE;
-        cursor_move_eh.fn   = cursor_move;
-        yed_plugin_add_event_handler(self, cursor_move_eh);
+    /*     FRAME_POST_SCROLL */
+        yed_event_handler frame_post_scroll_eh;
+        frame_post_scroll_eh.kind = EVENT_FRAME_POST_SCROLL;
+        frame_post_scroll_eh.fn   = frame_post_scroll;
+        yed_plugin_add_event_handler(self, frame_post_scroll_eh);
 
         yed_plugin_set_unload_fn(self, unload);
         yed_plugin_set_command(self, "diff", diff);
@@ -291,7 +291,7 @@ static void diff(int n_args, char **args) {
 
     diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
     if (strcmp(diff_multi_line_var, "myers") == 0) {
-        DBG("myers_row");
+        DBG("myers");
         Myers<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         diff_m.f_diff = myers.diff();
@@ -300,12 +300,21 @@ static void diff(int n_args, char **args) {
         Myers_linear<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         diff_m.f_diff = myers.diff();
+    } else if (strcmp(diff_multi_line_var, "myers_row") == 0) {
+        DBG("myers_row");
+        Myers_row myers(array_len(diff_m.buff_diff[LEFT]->lines), array_len(diff_m.buff_diff[RIGHT]->lines));
+        diff_m.f_diff = myers.diff();
     }
 
     if (diff_m.f_diff.size() == 0) {
         yed_cerr("Files were the same!");
         return;
     }
+    high_resolution_clock::time_point t2 = high_resolution_clock::now();
+    duration<double> time_span = duration_cast<duration<double>>(t2 - t1);
+    high_resolution_clock::time_point t3 = high_resolution_clock::now();
+
+    DBG("time: %lf (seconds)", time_span.count());
 
     YEXE("frame-new");
     YEXE("buffer", diff_m.buff_diff[LEFT]->name);
@@ -318,14 +327,15 @@ static void diff(int n_args, char **args) {
     yed_log("%s, %s", buff_1, buff_2);
     LOG_EXIT();
 
-    high_resolution_clock::time_point t2 = high_resolution_clock::now();
-    duration<double> time_span = duration_cast<duration<double>>(t2 - t1);
+    high_resolution_clock::time_point t4 = high_resolution_clock::now();
+    duration<double> time_span1 = duration_cast<duration<double>>(t4 - t3);
 
-    DBG("time: %lf (seconds)", time_span.count());
+    DBG("time: %lf (seconds)", time_span1.count());
 }
 
 static int init(void) {
     yed_line *line;
+    char     *diff_multi_line_var;
     string    A;
     string    B;
 
@@ -337,23 +347,26 @@ static int init(void) {
         return 1;
     }
 
-    diff_m.line_buff[LEFT].clear();
-    diff_m.line_buff[RIGHT].clear();
+    diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
+    if (strcmp(diff_multi_line_var, "myers") == 0 || strcmp(diff_multi_line_var, "myers_linear") == 0) {
+        diff_m.line_buff[LEFT].clear();
+        diff_m.line_buff[RIGHT].clear();
 
-    bucket_array_traverse(diff_m.buff_orig[LEFT]->lines, line) {
-        array_zero_term(line->chars);
-        A.clear();
-        A.append((char *)(line->chars.data));
-        A.append("\n");
-        diff_m.line_buff[LEFT].push_back(A);
-    }
+        bucket_array_traverse(diff_m.buff_orig[LEFT]->lines, line) {
+            array_zero_term(line->chars);
+            A.clear();
+            A.append((char *)(line->chars.data));
+            A.append("\n");
+            diff_m.line_buff[LEFT].push_back(A);
+        }
 
-    bucket_array_traverse(diff_m.buff_orig[RIGHT]->lines, line) {
-        array_zero_term(line->chars);
-        B.clear();
-        B.append((char *)(line->chars.data));
-        B.append("\n");
-        diff_m.line_buff[RIGHT].push_back(B);
+        bucket_array_traverse(diff_m.buff_orig[RIGHT]->lines, line) {
+            array_zero_term(line->chars);
+            B.clear();
+            B.append((char *)(line->chars.data));
+            B.append("\n");
+            diff_m.line_buff[RIGHT].push_back(B);
+        }
     }
 
     return 0;
@@ -729,8 +742,16 @@ static void line_char_draw(yed_event *event) {
     }
 }
 
-static void cursor_move(yed_event *event) {
+bool scrolling_others = false;
+
+static void frame_post_scroll(yed_event *event) {
+    yed_frame_tree *p;
+    yed_frame_tree *other_child;
     int current_row;
+
+    if (scrolling_others) {
+        return;
+    }
 
     if (event->frame                                              == NULL
     ||  event->frame->buffer                                      == NULL
@@ -744,8 +765,15 @@ static void cursor_move(yed_event *event) {
         return;
     }
 
-    if (event->frame->buffer == diff_m.buff_diff[RIGHT]) {
-            current_row = event->frame->tree->parent->child_trees[0]->frame->cursor_line;
-            yed_set_cursor_far_within_frame(event->frame->tree->parent->child_trees[0]->frame, event->new_row, 1);
+    if (event->frame->tree->parent->child_trees[0]->frame->buffer != diff_m.buff_diff[LEFT]
+    &&  event->frame->tree->parent->child_trees[1]->frame->buffer != diff_m.buff_diff[RIGHT]) {
+        return;
     }
+
+    p = event->frame->tree->parent;
+    other_child = p->child_trees[event->frame->tree == p->child_trees[0]];
+
+    scrolling_others = true;
+    yed_frame_scroll_buffer(other_child->frame, event->frame->buffer_y_offset - other_child->frame->buffer_y_offset);
+    scrolling_others = false;
 }

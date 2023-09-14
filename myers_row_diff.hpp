@@ -12,9 +12,9 @@ class Myers_row {
         vector<file_diff> f_diff;
 
         Myers_row(int len_a, int len_b) {
-            len[LEFT] = len_a;
+            len[LEFT]  = len_a;
             len[RIGHT] = len_b;
-            max   = len_a + len_b;
+            max        = len_a + len_b;
         }
 
         // Member Functions
@@ -26,23 +26,43 @@ class Myers_row {
             return indx;
         }
 
+        char *yed_get_line_text_tmp(yed_buffer *buffer, int row) {
+            yed_line *line;
+
+            line = yed_buff_get_line(buffer, row);
+
+            if (line == NULL) { return NULL; }
+
+            array_zero_term(line->chars);
+
+            return line->chars.data;
+        }
+
+        int yed_get_line_text_len(yed_buffer *buffer, int row) {
+            yed_line *line;
+
+            line = yed_buff_get_line(buffer, row);
+
+            if (line == NULL) { return NULL; }
+
+            return array_len(line->chars);
+        }
+
         //Finds the Shortest Edit Path
         vector<vector<int>> shortest_edit(void) {
             int                 x;
             int                 y;
             int                 size;
-            int                 tot;
+            int                 tot = 0;
             vector<vector<int>> trace;
 
             size = 2 * max + 1;
 
             vector<int> v(2 * max + 1);
             v[1] = 0;
-            tot  = 0;
 
             for(int d = 0; d <= max; d++) {
                 trace.push_back(v);
-                tot++;
                 for(int k = -d; k <= d; k+=2) {
                     if (k == -d || (k != d
                         && v[wrap_indx(size, k - 1)] < v[wrap_indx(size, k + 1)])) {
@@ -53,16 +73,20 @@ class Myers_row {
 
                     y = x - k;
 
-                    while (x < len[LEFT] && y < len[RIGHT]
-                    && (strcmp(yed_get_line_text(diff_m.buff_orig[LEFT], x - 1),  yed_get_line_text(diff_m.buff_orig[RIGHT], y - 1)) == 0)) {
+                    while ((x + 1) < len[LEFT] && (y + 1) < len[RIGHT]
+                    && yed_get_line_text_len(diff_m.buff_orig[LEFT], x + 1) == yed_get_line_text_len(diff_m.buff_orig[RIGHT], y + 1)
+                    && (strcmp(yed_get_line_text_tmp(diff_m.buff_orig[LEFT], x + 1),
+                               yed_get_line_text_tmp(diff_m.buff_orig[RIGHT], y + 1)) == 0)) {
                                x++;
                                y++;
+                               tot++;
                     }
 
                     v[wrap_indx(size, k)] = x;
 
-                    if (x >= len[LEFT]
-                        && y >= len[RIGHT]) {
+                    if ((x + 1) >= len[LEFT]
+                        && (y + 1) >= len[RIGHT]) {
+                        DBG("total: %d", tot);
                         return trace;
                     }
                 }

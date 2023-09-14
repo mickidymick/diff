@@ -37,18 +37,15 @@ class Myers {
             int                 x;
             int                 y;
             int                 size;
-            int                 tot;
             vector<vector<int>> trace;
 
             size = 2 * max + 1;
 
             vector<int> v(2 * max + 1);
             v[1] = 0;
-            tot  = 0;
 
             for(int d = 0; d <= max; d++) {
                 trace.push_back(v);
-                tot++;
                 for(int k = -d; k <= d; k+=2) {
                     if (k == -d || (k != d
                         && v[wrap_indx(size, k - 1)] < v[wrap_indx(size, k + 1)])) {
@@ -75,16 +72,6 @@ class Myers {
         }
 
         void backtrack_yield(int prev_x, int prev_y, int x, int y) {
-            string a_line;
-            string b_line;
-
-            if (prev_x >= 0 && prev_x < len_a) {
-                a_line = a[prev_x];
-            }
-            if (prev_y >= 0 && prev_y < len_b) {
-                b_line = b[prev_y];
-            }
-
             if (x == prev_x) {
                 file_diff tmp_line_diff(INS, prev_x + 1, INS, prev_y + 1);
                 f_diff.insert(f_diff.begin(), tmp_line_diff);
