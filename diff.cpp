@@ -118,7 +118,7 @@ extern "C" {
         yed_plugin_set_completion(self, "diff-compl-arg-1", diff_completion_multiple);
 
         if (yed_get_var("diff-multi-line-compare-algorithm") == NULL) {
-            yed_set_var("diff-multi-line-compare-algorithm", "myers");
+            yed_set_var("diff-multi-line-compare-algorithm", "myers_linear");
         }
 
         if (yed_get_var("diff-line-compare-algorithm") == NULL) {
@@ -146,7 +146,7 @@ extern "C" {
         }
 
         if (yed_get_var("diff-inner-compare-char-color") == NULL) {
-            yed_set_var("diff-inner-compare-char-color", "&active &red swap");
+            yed_set_var("diff-inner-compare-char-color", "&active &attention swap");
         }
 
         if (yed_get_var("diff-trunc-color") == NULL) {
@@ -784,6 +784,12 @@ static void line_char_draw(yed_event *event) {
     yed_line  *tmp_line;
     char      *color_var;
     yed_attrs  tmp_attr;
+    int        top_row;
+    int        top_left_col;
+    int        bot_row;
+    int        bot_right_col;
+    int        left_col;
+    int        right_col;
 
     if (event->frame         == NULL
     ||  event->frame->buffer == NULL
@@ -810,6 +816,40 @@ static void line_char_draw(yed_event *event) {
                         tmp_attr   = yed_parse_attrs(color_var);
                     }
 //                     DBG("red r:%d c:%d\n", event->row, col);
+
+                    if (diff_m.buff_diff[LEFT]->has_selection) {
+                        if (diff_m.buff_diff[LEFT]->selection.anchor_row < diff_m.buff_diff[LEFT]->selection.cursor_row) {
+                            top_row = diff_m.buff_diff[LEFT]->selection.anchor_row;
+                            top_left_col = diff_m.buff_diff[LEFT]->selection.anchor_col;
+                            bot_row = diff_m.buff_diff[LEFT]->selection.cursor_row;
+                            bot_right_col = diff_m.buff_diff[LEFT]->selection.cursor_col;
+                        } else {
+                            top_row = diff_m.buff_diff[LEFT]->selection.cursor_row;
+                            top_left_col = diff_m.buff_diff[LEFT]->selection.cursor_col;
+                            bot_row = diff_m.buff_diff[LEFT]->selection.anchor_row;
+                            bot_right_col = diff_m.buff_diff[LEFT]->selection.anchor_col;
+                        }
+
+                        if (diff_m.buff_diff[LEFT]->selection.anchor_col < diff_m.buff_diff[LEFT]->selection.cursor_col) {
+                            left_col = diff_m.buff_diff[LEFT]->selection.anchor_col;
+                            right_col = diff_m.buff_diff[LEFT]->selection.cursor_col;
+                        } else {
+                            left_col = diff_m.buff_diff[LEFT]->selection.cursor_col;
+                            right_col = diff_m.buff_diff[LEFT]->selection.anchor_col;
+                        }
+
+                        if (top_row <= event->row && event->row <= bot_row) {
+                            if (top_row < event->row && event->row < bot_row) {
+                                continue;
+                            } else if (event->row == top_row && top_row != bot_row && col >= top_left_col) {
+                                continue;
+                            } else if (event->row == bot_row && top_row != bot_row && col < bot_right_col) {
+                                continue;
+                            } else if (event->row == top_row && event->row == bot_row && left_col <= col && col < right_col) {
+                                continue;
+                            }
+                        }
+                    }
                     yed_eline_combine_col_attrs(event, col, &tmp_attr);
                 }
             }
@@ -832,6 +872,40 @@ static void line_char_draw(yed_event *event) {
                         tmp_attr   = yed_parse_attrs(color_var);
                     }
 //                     DBG("red r:%d c:%d\n", event->row, col);
+
+                    if (diff_m.buff_diff[RIGHT]->has_selection) {
+                        if (diff_m.buff_diff[RIGHT]->selection.anchor_row < diff_m.buff_diff[RIGHT]->selection.cursor_row) {
+                            top_row = diff_m.buff_diff[RIGHT]->selection.anchor_row;
+                            top_left_col = diff_m.buff_diff[RIGHT]->selection.anchor_col;
+                            bot_row = diff_m.buff_diff[RIGHT]->selection.cursor_row;
+                            bot_right_col = diff_m.buff_diff[RIGHT]->selection.cursor_col;
+                        } else {
+                            top_row = diff_m.buff_diff[RIGHT]->selection.cursor_row;
+                            top_left_col = diff_m.buff_diff[RIGHT]->selection.cursor_col;
+                            bot_row = diff_m.buff_diff[RIGHT]->selection.anchor_row;
+                            bot_right_col = diff_m.buff_diff[RIGHT]->selection.anchor_col;
+                        }
+
+                        if (diff_m.buff_diff[RIGHT]->selection.anchor_col < diff_m.buff_diff[RIGHT]->selection.cursor_col) {
+                            left_col = diff_m.buff_diff[RIGHT]->selection.anchor_col;
+                            right_col = diff_m.buff_diff[RIGHT]->selection.cursor_col;
+                        } else {
+                            left_col = diff_m.buff_diff[RIGHT]->selection.cursor_col;
+                            right_col = diff_m.buff_diff[RIGHT]->selection.anchor_col;
+                        }
+
+                        if (top_row <= event->row && event->row <= bot_row) {
+                            if (top_row < event->row && event->row < bot_row) {
+                                continue;
+                            } else if (event->row == top_row && top_row != bot_row && col >= top_left_col) {
+                                continue;
+                            } else if (event->row == bot_row && top_row != bot_row && col < bot_right_col) {
+                                continue;
+                            } else if (event->row == top_row && event->row == bot_row && left_col <= col && col < right_col) {
+                                continue;
+                            }
+                        }
+                    }
                     yed_eline_combine_col_attrs(event, col, &tmp_attr);
                 }
             }
