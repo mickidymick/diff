@@ -377,21 +377,33 @@ static int init(void) {
     return 0;
 }
 
-static int truncate_lines(int num_cont_eql_rows, int last_eql_row) {
+static int truncate_lines(int tot_num_rows, int last_row) {
     int min_rows;
+    int first_row;
+    int first_remove_row;
+    int last_remove_row;
+    int tot_num_truncate_rows;
 
     if (yed_var_is_truthy("diff-truncate-lines")) {
         yed_get_var_as_int("diff-truncate-lines-min-num", &min_rows);
-        if (num_cont_eql_rows > min_rows + 1) {
-            DBG("top:     %d", last_eql_row - num_cont_eql_rows + 1);
-            DBG("truncate %d rows", num_cont_eql_rows - min_rows);
-            DBG("bottom:  %d", last_eql_row);
+        if (min_rows % 2 != 0) {
+            min_rows++;
+        }
 
-            if (min_rows % 2 != 0) {
-                min_rows++;
-            }
+        if (tot_num_rows > min_rows + 1) {
 
-            for (int i = last_eql_row - (min_rows / 2); i > last_eql_row + num_cont_eql_rows - min_rows; i--) {
+            first_row             = last_row - tot_num_rows + 1;
+            first_remove_row       = last_row - tot_num_rows + (min_rows / 2) + 1;
+            tot_num_truncate_rows = tot_num_rows - min_rows;
+            last_remove_row      = last_row - (min_rows / 2);
+//             DBG("top:       %d", first_row);
+//             DBG("first_rem: %d", first_remove_row);
+//             DBG("truncate   %d rows", tot_num_truncate_rows);
+//             DBG("last_rem:  %d", last_remove_row);
+//             DBG("bottom:    %d", last_row);
+
+            for (int i = last_remove_row; i >= first_remove_row; i--) {
+//                 DBG("%d", i);
                 yed_buff_delete_line_no_undo(diff_m.buff_diff[LEFT], i);
                 yed_buff_delete_line_no_undo(diff_m.buff_diff[RIGHT], i);
             }
@@ -399,12 +411,12 @@ static int truncate_lines(int num_cont_eql_rows, int last_eql_row) {
             char trunc_str[512];
             char dashes[300];
             memset(dashes, '-', 300);
-            snprintf(trunc_str, 50, "------ %d lines: char                 ", num_cont_eql_rows - min_rows);
+            snprintf(trunc_str, 50, "------ %d lines: char                 ", tot_num_truncate_rows);
             strcat(trunc_str, dashes);
-            yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT], last_eql_row - num_cont_eql_rows + 1 + (min_rows / 2));
-            yed_buff_insert_string(diff_m.buff_diff[LEFT], trunc_str, last_eql_row - num_cont_eql_rows + 1 + (min_rows / 2), 1);
-            yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT], last_eql_row - num_cont_eql_rows + 1 + (min_rows / 2));
-            yed_buff_insert_string(diff_m.buff_diff[RIGHT], trunc_str, last_eql_row - num_cont_eql_rows + 1 + (min_rows / 2), 1);
+            yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT], first_remove_row);
+            yed_buff_insert_string(diff_m.buff_diff[LEFT], trunc_str, first_remove_row, 1);
+            yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT], first_remove_row);
+            yed_buff_insert_string(diff_m.buff_diff[RIGHT], trunc_str, first_remove_row, 1);
 
             for (int i = 0; i < min_rows / 2; i++) {
                 line tmp_line;
@@ -422,11 +434,11 @@ static int truncate_lines(int num_cont_eql_rows, int last_eql_row) {
                 diff_m.lines.push_back(tmp_line);
             }
 
-            return num_cont_eql_rows - min_rows;
+            return tot_num_truncate_rows - 1;
         }
     }
 
-    for (int i = 0; i < num_cont_eql_rows; i++) {
+    for (int i = 0; i < tot_num_rows; i++) {
         line tmp_line;
         tmp_line.line_type = EQL;
         diff_m.lines.push_back(std::move(tmp_line));
@@ -450,12 +462,13 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
     diff_m.lines.clear();
     diff_m.lines.push_back(std::move(init_line));
 
-    save_i            = 0;
-    num_tmp_ins       = 0;
-    num_tmp_del       = 0;
-    left_added_row    = 0;
-    right_added_row   = 0;
-    num_cont_eql_rows = 0;
+    save_i             = 0;
+    num_tmp_ins        = 0;
+    num_tmp_del        = 0;
+    left_added_row     = 0;
+    right_added_row    = 0;
+    num_cont_eql_rows  = 0;
+    num_truncated_rows = 0;
     for (int i = 0; i < diff_m.f_diff.size(); i++) {
 
         if (diff_m.f_diff[i].type[LEFT] == INIT) {
@@ -468,14 +481,14 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
             num_tmp_ins++;
 
             if (num_cont_eql_rows > 0) {
-                num_truncated_rows += truncate_lines(num_cont_eql_rows, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - 1);
+                num_truncated_rows += truncate_lines(num_cont_eql_rows, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - 1 - num_truncated_rows);
                 num_cont_eql_rows   = 0;
             }
         } else if (diff_m.f_diff[i].type[LEFT] == DEL) {
 //             DBG("DEL\n");
             num_tmp_del++;
             if (num_cont_eql_rows > 0) {
-                num_truncated_rows += truncate_lines(num_cont_eql_rows, diff_m.f_diff[i].row_num[LEFT] + left_added_row - 1);
+                num_truncated_rows += truncate_lines(num_cont_eql_rows, diff_m.f_diff[i].row_num[LEFT] + left_added_row - 1 - num_truncated_rows);
                 num_cont_eql_rows   = 0;
             }
         } else {
@@ -485,7 +498,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                 for (int j = num_tmp_ins; j > 0; j--) {
                     line tmp_line;
                     tmp_line.line_type = CHG;
-                    tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - j);
+                    tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - j - num_truncated_rows);
                     diff_m.lines.push_back(std::move(tmp_line));
 //                     DBG("row:%d   1 CHG", diff_m.f_diff[i].row_num[RIGHT] + right_added_row - j);
                 }
@@ -495,9 +508,9 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                     char dashes[512];
                     memset(dashes, '-', 512);
                     yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT],
-                        diff_m.f_diff[i].row_num[RIGHT] + right_added_row);
+                        diff_m.f_diff[i].row_num[RIGHT] + right_added_row - num_truncated_rows);
                     yed_buff_insert_string(diff_m.buff_diff[RIGHT],
-                        dashes, diff_m.f_diff[i].row_num[RIGHT] + right_added_row, 1);
+                        dashes, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - num_truncated_rows, 1);
 //                     DBG("row:%d   DEL", diff_m.f_diff[i].row_num[RIGHT] + right_added_row);
                     right_added_row++;
                     tmp_line.line_type = DEL;
@@ -507,7 +520,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                 for (int j = num_tmp_del; j > 0; j--) {
                     line tmp_line;
                     tmp_line.line_type = CHG;
-                    tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[LEFT] + left_added_row - j);
+                    tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
                     diff_m.lines.push_back(std::move(tmp_line));
 //                     DBG("row:%d   2 CHG", diff_m.f_diff[i].row_num[LEFT] + left_added_row - j);
                 }
@@ -517,9 +530,9 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                     char dashes[512];
                     memset(dashes, '-', 512);
                     yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT],
-                        diff_m.f_diff[i].row_num[LEFT] + left_added_row);
+                        diff_m.f_diff[i].row_num[LEFT] + left_added_row - num_truncated_rows);
                     yed_buff_insert_string(diff_m.buff_diff[LEFT],
-                        dashes, diff_m.f_diff[i].row_num[LEFT] + left_added_row, 1);
+                        dashes, diff_m.f_diff[i].row_num[LEFT] + left_added_row - num_truncated_rows, 1);
 //                     DBG("row:%d   INS", diff_m.f_diff[i].row_num[LEFT] + left_added_row);
                     left_added_row++;
                     tmp_line.line_type = INS;
@@ -529,7 +542,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                 for (int j = num_tmp_ins; j > 0; j--) {
                     line tmp_line;
                     tmp_line.line_type = CHG;
-                    tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[LEFT] + left_added_row - j);
+                    tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
                     diff_m.lines.push_back(std::move(tmp_line));
 //                     DBG("row:%d   3 CHG", diff_m.f_diff[i].row_num[LEFT] + left_added_row - j);
                 }
@@ -549,7 +562,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
         for (int j = num_tmp_ins; j > 0; j--) {
             line tmp_line;
             tmp_line.line_type = CHG;
-            tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - j);
+            tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - j - num_truncated_rows);
             diff_m.lines.push_back(std::move(tmp_line));
 //             DBG("row:%d   1 CHG", diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - j);
         }
@@ -559,9 +572,9 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
             char dashes[512];
             memset(dashes, '-', 512);
             yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT],
-                diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row);
+                diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - num_truncated_rows);
             yed_buff_insert_string(diff_m.buff_diff[RIGHT],
-                dashes, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row, 1);
+                dashes, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - num_truncated_rows, 1);
 //             DBG("row:%d   DEL", diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row);
             right_added_row++;
             tmp_line.line_type = DEL;
@@ -571,7 +584,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
         for (int j = num_tmp_del; j > 0; j--) {
             line tmp_line;
             tmp_line.line_type = CHG;
-            tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j);
+            tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
             diff_m.lines.push_back(std::move(tmp_line));
 //             DBG("row:%d   2 CHG", diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j);
         }
@@ -581,9 +594,9 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
             char dashes[512];
             memset(dashes, '-', 512);
             yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT],
-                diff_m.f_diff[save_i].row_num[LEFT] + left_added_row);
+                diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - num_truncated_rows);
             yed_buff_insert_string(diff_m.buff_diff[LEFT],
-                dashes, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row, 1);
+                dashes, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - num_truncated_rows, 1);
 //             DBG("row:%d   INS", diff_m.f_diff[save_i].row_num[LEFT] + left_added_row);
             left_added_row++;
             tmp_line.line_type = INS;
@@ -593,7 +606,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
         for (int j = num_tmp_ins; j > 0; j--) {
             line tmp_line;
             tmp_line.line_type = CHG;
-            tmp_line = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j);
+            tmp_line = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
             diff_m.lines.push_back(std::move(tmp_line));
 //             DBG("row:%d   3 CHG", diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j);
         }
