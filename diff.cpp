@@ -2,6 +2,16 @@ extern "C" {
     #include <yed/plugin.h>
 }
 
+// TODO:
+// --FEATURES
+//   add expand and contract feature for truncated lines
+//
+// --OPTIMIZATIONS
+//   need more speed for sure
+//
+// --BUGS
+//   fix bug in char diff "highlights the entire right line"
+
 #define DO_LOG
 #define DBG__XSTR(x) #x
 #define DBG_XSTR(x) DBG__XSTR(x)
@@ -18,14 +28,10 @@ do {                                                       \
 
 #include <string>
 #include <vector>
+#include <functional>
 #include <map>
 
 using namespace std;
-
-//time
-#include <ctime>
-#include <chrono>
-using namespace chrono;
 
 #define LEFT  (0)
 #define RIGHT (1)
@@ -40,8 +46,8 @@ using namespace chrono;
 
 class file_diff {
     public:
-        int    type[2];
-        int    row_num[2];
+        int type[2];
+        int row_num[2];
 
         file_diff(int t_1, int row_1, int t_2, int row_2) {
             type[0]    = t_1;
@@ -62,14 +68,15 @@ typedef struct diff_main_t {
     yed_buffer_ptr_t  buff_orig[2];
     yed_buffer_ptr_t  buff_diff[2];
     vector<line>      lines;
-    vector<string>    line_buff[2];
+    vector<size_t>    line_buff[2];
     vector<file_diff> f_diff;
 } diff_main;
 
 diff_main diff_m;
 
-#include "myers_diff.hpp"
-#include "myers_linear_diff.hpp"
+#include "time.hpp"
+#include "diff_algorithms/myers_diff.hpp"
+#include "diff_algorithms/myers_linear_diff.hpp"
 
 //Base Yed Plugin Functions
 static int  get_or_make_buffers(char *buff_1, char *buff_2);
@@ -83,7 +90,7 @@ static void diff(int n_args, char **args);
 static int  init(void);
 static int  truncate_lines(int num_cont_eql_rows, int last_eql_row);
 static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2);
-static line diff_adjacent_line(line tmp_line, int loc);
+static void diff_adjacent_line(line &tmp_line, int loc);
 static void update_diff_buffer(yed_buffer_ptr_t buff_orig, yed_buffer_ptr_t buff_diff);
 static void line_base_draw(yed_event *event);
 static void line_char_draw(yed_event *event);
@@ -284,9 +291,7 @@ static void diff(int n_args, char **args) {
         return;
     }
 
-    //time
-    high_resolution_clock::time_point t1 = high_resolution_clock::now();
-
+    clock_t tp_1 = time_start();
     snprintf(tmp_buff_1, 512, "*diff:%s", buff_1);
     snprintf(tmp_buff_2, 512, "*diff:%s", buff_2);
 
@@ -301,45 +306,40 @@ static void diff(int n_args, char **args) {
         yed_cerr("Could not initialize the diff!");
         return;
     }
+    time_print(time_stop(tp_1), "Init");
 
+    clock_t tp_2 = time_start();
     diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
     if (strcmp(diff_multi_line_var, "myers") == 0) {
         DBG("myers");
-        Myers<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+        Myers<vector<size_t>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         diff_m.f_diff = myers.diff();
     } else if (strcmp(diff_multi_line_var, "myers_linear") == 0) {
         DBG("myers_linear");
-        Myers_linear<vector<string>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+        Myers_linear<vector<size_t>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         diff_m.f_diff = myers.diff();
     }
+    time_print(time_stop(tp_2), "Diff algorithm");
 
     if (diff_m.f_diff.size() == 0) {
         yed_cerr("Files were the same!");
         return;
     }
-    high_resolution_clock::time_point t2 = high_resolution_clock::now();
-    duration<double> time_span = duration_cast<duration<double>>(t2 - t1);
-    high_resolution_clock::time_point t3 = high_resolution_clock::now();
-
-    DBG("time: %lf (seconds)", time_span.count());
 
     YEXE("frame-new");
     YEXE("buffer", diff_m.buff_diff[LEFT]->name);
     YEXE("frame-vsplit");
     YEXE("buffer", diff_m.buff_diff[RIGHT]->name);
 
+    clock_t tp_3 = time_start();
     align_buffers(diff_m.buff_diff[LEFT], diff_m.buff_diff[RIGHT]);
+    time_print(time_stop(tp_3), "align_buffers");
 
     LOG_FN_ENTER();
     yed_log("%s, %s", buff_1, buff_2);
     LOG_EXIT();
-
-    high_resolution_clock::time_point t4 = high_resolution_clock::now();
-    duration<double> time_span1 = duration_cast<duration<double>>(t4 - t3);
-
-    DBG("time: %lf (seconds)", time_span1.count());
 }
 
 static int init(void) {
@@ -358,12 +358,13 @@ static int init(void) {
     diff_m.line_buff[LEFT].clear();
     diff_m.line_buff[RIGHT].clear();
 
+    hash<string> hasher;
     bucket_array_traverse(diff_m.buff_orig[LEFT]->lines, line) {
         array_zero_term(line->chars);
         A.clear();
         A.append((char *)(line->chars.data));
         A.append("\n");
-        diff_m.line_buff[LEFT].push_back(A);
+        diff_m.line_buff[LEFT].push_back(hasher(A));
     }
 
     bucket_array_traverse(diff_m.buff_orig[RIGHT]->lines, line) {
@@ -371,7 +372,7 @@ static int init(void) {
         B.clear();
         B.append((char *)(line->chars.data));
         B.append("\n");
-        diff_m.line_buff[RIGHT].push_back(B);
+        diff_m.line_buff[RIGHT].push_back(hasher(B));
     }
 
     return 0;
@@ -392,27 +393,18 @@ static int truncate_lines(int tot_num_rows, int last_row) {
 
         if (tot_num_rows > min_rows + 1) {
 
-            first_row             = last_row - tot_num_rows + 1;
+            first_row              = last_row - tot_num_rows + 1;
             first_remove_row       = last_row - tot_num_rows + (min_rows / 2) + 1;
-            tot_num_truncate_rows = tot_num_rows - min_rows;
-            last_remove_row      = last_row - (min_rows / 2);
-//             DBG("top:       %d", first_row);
-//             DBG("first_rem: %d", first_remove_row);
-//             DBG("truncate   %d rows", tot_num_truncate_rows);
-//             DBG("last_rem:  %d", last_remove_row);
-//             DBG("bottom:    %d", last_row);
+            tot_num_truncate_rows  = tot_num_rows - min_rows;
+            last_remove_row        = last_row - (min_rows / 2);
 
             for (int i = last_remove_row; i >= first_remove_row; i--) {
-//                 DBG("%d", i);
                 yed_buff_delete_line_no_undo(diff_m.buff_diff[LEFT], i);
                 yed_buff_delete_line_no_undo(diff_m.buff_diff[RIGHT], i);
             }
 
-            char trunc_str[512];
-            char dashes[300];
-            memset(dashes, '-', 300);
-            snprintf(trunc_str, 50, "------ %d lines: char                 ", tot_num_truncate_rows);
-            strcat(trunc_str, dashes);
+            char trunc_str[25];
+            snprintf(trunc_str, 25, "------ %d lines: char");
             yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT], first_remove_row);
             yed_buff_insert_string(diff_m.buff_diff[LEFT], trunc_str, first_remove_row, 1);
             yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT], first_remove_row);
@@ -448,7 +440,6 @@ static int truncate_lines(int tot_num_rows, int last_row) {
 }
 
 static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
-    line init_line;
     int  save_i;
     int  num_tmp_ins;
     int  num_tmp_del;
@@ -457,7 +448,11 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
     int  num_cont_eql_rows;
     int  num_truncated_rows;
 
+    line init_line;
     init_line.line_type = INIT;
+
+//     char dashes[7];
+//     memset(dashes, '-', 6);
 
     diff_m.lines.clear();
     diff_m.lines.push_back(std::move(init_line));
@@ -477,7 +472,6 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
 
         save_i = i;
         if (diff_m.f_diff[i].type[RIGHT] == INS) {
-//             DBG("INS\n");
             num_tmp_ins++;
 
             if (num_cont_eql_rows > 0) {
@@ -485,33 +479,27 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                 num_cont_eql_rows   = 0;
             }
         } else if (diff_m.f_diff[i].type[LEFT] == DEL) {
-//             DBG("DEL\n");
             num_tmp_del++;
             if (num_cont_eql_rows > 0) {
                 num_truncated_rows += truncate_lines(num_cont_eql_rows, diff_m.f_diff[i].row_num[LEFT] + left_added_row - 1 - num_truncated_rows);
                 num_cont_eql_rows   = 0;
             }
         } else {
-//             DBG("EQL\n");
 
             if (num_tmp_ins < num_tmp_del) {
                 for (int j = num_tmp_ins; j > 0; j--) {
                     line tmp_line;
                     tmp_line.line_type = CHG;
-                    tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - j - num_truncated_rows);
+                    diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - j - num_truncated_rows);
                     diff_m.lines.push_back(std::move(tmp_line));
-//                     DBG("row:%d   1 CHG", diff_m.f_diff[i].row_num[RIGHT] + right_added_row - j);
                 }
 
                 for (int j = num_tmp_ins; j < num_tmp_del; j++) {
                     line tmp_line;
-                    char dashes[512];
-                    memset(dashes, '-', 512);
                     yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT],
                         diff_m.f_diff[i].row_num[RIGHT] + right_added_row - num_truncated_rows);
-                    yed_buff_insert_string(diff_m.buff_diff[RIGHT],
-                        dashes, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - num_truncated_rows, 1);
-//                     DBG("row:%d   DEL", diff_m.f_diff[i].row_num[RIGHT] + right_added_row);
+//                     yed_buff_insert_string(diff_m.buff_diff[RIGHT],
+//                         dashes, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - num_truncated_rows, 1);
                     right_added_row++;
                     tmp_line.line_type = DEL;
                     diff_m.lines.push_back(std::move(tmp_line));
@@ -520,20 +508,16 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                 for (int j = num_tmp_del; j > 0; j--) {
                     line tmp_line;
                     tmp_line.line_type = CHG;
-                    tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
+                    diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
                     diff_m.lines.push_back(std::move(tmp_line));
-//                     DBG("row:%d   2 CHG", diff_m.f_diff[i].row_num[LEFT] + left_added_row - j);
                 }
 
                 for (int j = num_tmp_del; j < num_tmp_ins; j++) {
                     line tmp_line;
-                    char dashes[512];
-                    memset(dashes, '-', 512);
                     yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT],
                         diff_m.f_diff[i].row_num[LEFT] + left_added_row - num_truncated_rows);
-                    yed_buff_insert_string(diff_m.buff_diff[LEFT],
-                        dashes, diff_m.f_diff[i].row_num[LEFT] + left_added_row - num_truncated_rows, 1);
-//                     DBG("row:%d   INS", diff_m.f_diff[i].row_num[LEFT] + left_added_row);
+//                     yed_buff_insert_string(diff_m.buff_diff[LEFT],
+//                         dashes, diff_m.f_diff[i].row_num[LEFT] + left_added_row - num_truncated_rows, 1);
                     left_added_row++;
                     tmp_line.line_type = INS;
                     diff_m.lines.push_back(std::move(tmp_line));
@@ -542,15 +526,11 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                 for (int j = num_tmp_ins; j > 0; j--) {
                     line tmp_line;
                     tmp_line.line_type = CHG;
-                    tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
+                    diff_adjacent_line(tmp_line, diff_m.f_diff[i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
                     diff_m.lines.push_back(std::move(tmp_line));
-//                     DBG("row:%d   3 CHG", diff_m.f_diff[i].row_num[LEFT] + left_added_row - j);
                 }
             }
 
-//             line tmp_line;
-//             tmp_line.line_type = EQL;
-//             diff_m.lines.push_back(std::move(tmp_line));
             num_cont_eql_rows++;
 
             num_tmp_ins = 0;
@@ -562,20 +542,16 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
         for (int j = num_tmp_ins; j > 0; j--) {
             line tmp_line;
             tmp_line.line_type = CHG;
-            tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - j - num_truncated_rows);
+            diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - j - num_truncated_rows);
             diff_m.lines.push_back(std::move(tmp_line));
-//             DBG("row:%d   1 CHG", diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - j);
         }
 
         for (int j = num_tmp_ins; j < num_tmp_del; j++) {
             line tmp_line;
-            char dashes[512];
-            memset(dashes, '-', 512);
             yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT],
                 diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - num_truncated_rows);
-            yed_buff_insert_string(diff_m.buff_diff[RIGHT],
-                dashes, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - num_truncated_rows, 1);
-//             DBG("row:%d   DEL", diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row);
+//             yed_buff_insert_string(diff_m.buff_diff[RIGHT],
+//                 dashes, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - num_truncated_rows, 1);
             right_added_row++;
             tmp_line.line_type = DEL;
             diff_m.lines.push_back(std::move(tmp_line));
@@ -584,20 +560,16 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
         for (int j = num_tmp_del; j > 0; j--) {
             line tmp_line;
             tmp_line.line_type = CHG;
-            tmp_line           = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
+            diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
             diff_m.lines.push_back(std::move(tmp_line));
-//             DBG("row:%d   2 CHG", diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j);
         }
 
         for (int j = num_tmp_del; j < num_tmp_ins; j++) {
             line tmp_line;
-            char dashes[512];
-            memset(dashes, '-', 512);
             yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT],
                 diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - num_truncated_rows);
-            yed_buff_insert_string(diff_m.buff_diff[LEFT],
-                dashes, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - num_truncated_rows, 1);
-//             DBG("row:%d   INS", diff_m.f_diff[save_i].row_num[LEFT] + left_added_row);
+//             yed_buff_insert_string(diff_m.buff_diff[LEFT],
+//                 dashes, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - num_truncated_rows, 1);
             left_added_row++;
             tmp_line.line_type = INS;
             diff_m.lines.push_back(std::move(tmp_line));
@@ -606,14 +578,13 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
         for (int j = num_tmp_ins; j > 0; j--) {
             line tmp_line;
             tmp_line.line_type = CHG;
-            tmp_line = diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
+            diff_adjacent_line(tmp_line, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j - num_truncated_rows);
             diff_m.lines.push_back(std::move(tmp_line));
-//             DBG("row:%d   3 CHG", diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - j);
         }
     }
 }
 
-static line diff_adjacent_line(line tmp_line, int loc) {
+static void diff_adjacent_line(line &tmp_line, int loc) {
     char *left;
     char *right;
     char *diff_line_var;
@@ -645,8 +616,8 @@ static line diff_adjacent_line(line tmp_line, int loc) {
             Myers<string> myers_r(left, left_len, right, right_len);
             tmp_file_diff = myers_r.diff();
         } else if (strcmp(diff_line_var, "myers_linear") == 0) {
-            Myers_linear<string> myers_r(left, left_len, right, right_len);
-            tmp_file_diff = myers_r.diff();
+//             Myers_linear<string> myers_r(left, left_len, right, right_len);
+//             tmp_file_diff = myers_r.diff();
         }
 
 //         DBG("%d", tmp_file_diff.size());
@@ -698,7 +669,6 @@ static line diff_adjacent_line(line tmp_line, int loc) {
 //         DBG("RIGHT begin:%d end:%d", tmp_line.col_begin[RIGHT], tmp_line.col_end[RIGHT]);
 //         DBG("\n");
     }
-    return tmp_line;
 }
 
 static void update_diff_buffer(yed_buffer_ptr_t buff_orig, yed_buffer_ptr_t buff_diff) {
