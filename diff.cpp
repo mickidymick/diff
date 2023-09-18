@@ -29,6 +29,7 @@ do {                                                       \
 #include <string>
 #include <vector>
 #include <functional>
+#include <unordered_map>
 #include <map>
 
 using namespace std;
@@ -68,7 +69,7 @@ typedef struct diff_main_t {
     yed_buffer_ptr_t  buff_orig[2];
     yed_buffer_ptr_t  buff_diff[2];
     vector<line>      lines;
-    vector<size_t>    line_buff[2];
+    vector<int>       line_buff[2];
     vector<file_diff> f_diff;
 } diff_main;
 
@@ -312,12 +313,12 @@ static void diff(int n_args, char **args) {
     diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
     if (strcmp(diff_multi_line_var, "myers") == 0) {
         DBG("myers");
-        Myers<vector<size_t>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+        Myers<vector<int>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         diff_m.f_diff = myers.diff();
     } else if (strcmp(diff_multi_line_var, "myers_linear") == 0) {
         DBG("myers_linear");
-        Myers_linear<vector<size_t>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+        Myers_linear<vector<int>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         diff_m.f_diff = myers.diff();
     }
@@ -343,9 +344,12 @@ static void diff(int n_args, char **args) {
 }
 
 static int init(void) {
-    yed_line *line;
-    string    A;
-    string    B;
+    yed_line                              *line;
+    unordered_map <string, int>            hashmap;
+    unordered_map <string, int>::iterator  hashmap_iter;
+    int                                    unique_id;
+    string                                 A;
+    string                                 B;
 
     if (diff_m.buff_orig[LEFT] == NULL) {
         yed_cerr("Couldn't find the first diff buffer.");
@@ -358,13 +362,22 @@ static int init(void) {
     diff_m.line_buff[LEFT].clear();
     diff_m.line_buff[RIGHT].clear();
 
-    hash<string> hasher;
+    unique_id = 0;
+
     bucket_array_traverse(diff_m.buff_orig[LEFT]->lines, line) {
         array_zero_term(line->chars);
         A.clear();
         A.append((char *)(line->chars.data));
         A.append("\n");
-        diff_m.line_buff[LEFT].push_back(hasher(A));
+
+        hashmap_iter = hashmap.find(A);
+        if (hashmap_iter != hashmap.end()) {
+            diff_m.line_buff[LEFT].push_back(hashmap_iter->second);
+        } else {
+            diff_m.line_buff[LEFT].push_back(unique_id);
+            hashmap.insert({A, unique_id});
+            unique_id++;
+        }
     }
 
     bucket_array_traverse(diff_m.buff_orig[RIGHT]->lines, line) {
@@ -372,7 +385,15 @@ static int init(void) {
         B.clear();
         B.append((char *)(line->chars.data));
         B.append("\n");
-        diff_m.line_buff[RIGHT].push_back(hasher(B));
+
+        hashmap_iter = hashmap.find(B);
+        if (hashmap_iter != hashmap.end()) {
+            diff_m.line_buff[RIGHT].push_back(hashmap_iter->second);
+        } else {
+            diff_m.line_buff[RIGHT].push_back(unique_id);
+            hashmap.insert({B, unique_id});
+            unique_id++;
+        }
     }
 
     return 0;
@@ -890,6 +911,8 @@ static void frame_post_scroll(yed_event *event) {
     yed_frame_tree *other_child;
     int current_row;
 
+    DBG("woo");
+
     if (scrolling_others) {
         return;
     }
@@ -915,6 +938,13 @@ static void frame_post_scroll(yed_event *event) {
     other_child = p->child_trees[event->frame->tree == p->child_trees[0]];
 
     scrolling_others = true;
+
+    yed_log(" \n");
+    yed_log("B LEFT  y-offset:%d\n",   p->child_trees[0]->frame->buffer_y_offset);
+    yed_log("B RIGHT y-offset:%d\n", p->child_trees[1]->frame->buffer_y_offset);
     yed_frame_scroll_buffer(other_child->frame, event->frame->buffer_y_offset - other_child->frame->buffer_y_offset);
+    yed_log(" \n");
+    yed_log("A LEFT  y-offset:%d\n",   p->child_trees[0]->frame->buffer_y_offset);
+    yed_log("A RIGHT y-offset:%d\n\n", p->child_trees[1]->frame->buffer_y_offset);
     scrolling_others = false;
 }
