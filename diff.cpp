@@ -207,7 +207,7 @@ static int get_or_make_buffers(char *buff_1, char *buff_2) {
     }
     diff_m.buff_orig[RIGHT] = buffer;
 
-    snprintf(tmp_buff, 512, "*diff:%s", diff_m.buff_orig[LEFT]->name);
+    snprintf(tmp_buff, 512, "*diff:%s", diff_m.buff_orig[LEFT]->path);
     buffer = yed_get_buffer(tmp_buff);
     if (buffer == NULL) {
         buffer = yed_create_buffer(tmp_buff);
@@ -216,7 +216,7 @@ static int get_or_make_buffers(char *buff_1, char *buff_2) {
     diff_m.buff_diff[LEFT] = buffer;
     update_diff_buffer(diff_m.buff_orig[LEFT], diff_m.buff_diff[LEFT]);
 
-    snprintf(tmp_buff, 512, "*diff:%s", diff_m.buff_orig[RIGHT]->name);
+    snprintf(tmp_buff, 512, "*diff:%s", diff_m.buff_orig[RIGHT]->path);
     buffer = yed_get_buffer(tmp_buff);
     if (buffer == NULL) {
         buffer = yed_create_buffer(tmp_buff);
