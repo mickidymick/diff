@@ -139,6 +139,8 @@ class Patience {
             return match;
         }
 
+        vector<Match *> match_ptrs;
+
         Match *unique_matching_lines(Slice slice) {
             Match                                              *match;
             Match                                              *last_match;
@@ -146,7 +148,7 @@ class Patience {
             int                                                 counts;
             unordered_map <int, vector<int> *>                    hashmap;
             unordered_map <int, vector<int> *>::iterator          hashmap_iter;
-            vector<vector<int> *>            order;
+            vector<vector<int> *> order;
 
             for(int i = slice.a_low; i < slice.a_high; i++) {
                 hashmap_iter = hashmap.find(a[i]);
@@ -181,13 +183,19 @@ class Patience {
                 if (order[i]->at(0) == 1 && order[i]->at(1) == 1) {
                     if (match == NULL) {
                         tmp_match = new Match(order[i]->at(2), order[i]->at(3), NULL, NULL);
+                        match_ptrs.push_back(tmp_match);
                         match = tmp_match;
                     } else {
                         tmp_match = new Match(order[i]->at(2), order[i]->at(3), last_match, NULL);
+                        match_ptrs.push_back(tmp_match);
                         last_match->next = tmp_match;
                     }
                     last_match = tmp_match;
                 }
+            }
+
+            for(hashmap_iter = hashmap.begin(); hashmap_iter != hashmap.end(); hashmap_iter++) {
+                delete hashmap_iter->second;
             }
 
             return match;
@@ -273,6 +281,10 @@ class Patience {
                 b_line = match->b_line + 1;
 
                 match  = match->next;
+            }
+
+            for(int i = 0; i < match_ptrs.size(); i++) {
+                delete match_ptrs[i];
             }
 
             return f_diff;
