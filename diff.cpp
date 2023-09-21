@@ -29,7 +29,6 @@ do {                                                       \
 
 #include <string>
 #include <vector>
-#include <functional>
 #include <unordered_map>
 #include <map>
 
@@ -78,7 +77,6 @@ typedef struct diff_main_t {
 
 diff_main diff_m;
 
-#include "time.hpp"
 #include "diff_algorithms/myers_diff.hpp"
 #include "diff_algorithms/myers_linear_diff.hpp"
 #include "diff_algorithms/patience_diff.hpp"
@@ -104,7 +102,7 @@ static void frame_post_scroll(yed_event *event);
 extern "C" {
     int yed_plugin_boot(yed_plugin *self) {
         YED_PLUG_VERSION_CHECK();
-
+int a;
     /*     ROW_PRE_CLEAR */
         yed_event_handler line_base_draw_eh;
         line_base_draw_eh.kind = EVENT_ROW_PRE_CLEAR;
@@ -231,6 +229,22 @@ static int get_or_make_buffers(char *buff_1, char *buff_2) {
 }
 
 static void unload(yed_plugin *self) {
+    yed_buffer_ptr_t buffer;
+
+    buffer = yed_get_buffer(diff_m.buff_diff[LEFT]->name);
+    if (buffer != NULL) {
+        yed_free_buffer(buffer);
+    }
+
+    buffer = yed_get_buffer(diff_m.buff_diff[RIGHT]->name);
+    if (buffer != NULL) {
+        yed_free_buffer(buffer);
+    }
+
+    diff_m.lines.clear();
+    diff_m.line_buff[LEFT].clear();
+    diff_m.line_buff[RIGHT].clear();
+    diff_m.f_diff.clear();
 }
 
 static int diff_completion(char *name, struct yed_completion_results_t *comp_res) {
@@ -357,6 +371,8 @@ static void diff(int n_args, char **args) {
     YEXE("buffer", diff_m.buff_diff[RIGHT]->name);
 
     align_buffers(diff_m.buff_diff[LEFT], diff_m.buff_diff[RIGHT]);
+
+    diff_m.f_diff.clear();
 
     LOG_FN_ENTER();
     yed_log("%s, %s", buff_1, buff_2);

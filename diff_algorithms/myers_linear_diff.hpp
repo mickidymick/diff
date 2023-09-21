@@ -217,6 +217,7 @@ class Myers_linear {
                 for (int i = 0; i < head->size(); i++) {
                     ret_snake->emplace_back(head->at(i).x, head->at(i).y);
                 }
+                free(head);
             } else {
                 ret_snake->emplace_back(snake->start.x, snake->start.y);
             }
@@ -225,10 +226,12 @@ class Myers_linear {
                 for (int i = 0; i < tail->size(); i++) {
                     ret_snake->emplace_back(tail->at(i).x, tail->at(i).y);
                 }
+                free(tail);
             } else {
                 ret_snake->emplace_back(snake->end.x, snake->end.y);
             }
 
+            free(snake);
             return ret_snake;
         }
 
@@ -304,6 +307,7 @@ class Myers_linear {
                 walk_diagonal(x1, y1, x2, y2, f_diff);
             }
 
+            free(path);
             return f_diff;
         }
 };
