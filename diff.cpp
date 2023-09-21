@@ -75,7 +75,10 @@ typedef struct diff_main_t {
     vector<file_diff> f_diff;
 } diff_main;
 
-diff_main diff_m;
+diff_main         diff_m;
+yed_event_handler line_base_draw_eh;
+yed_event_handler line_char_draw_eh;
+yed_event_handler frame_post_scroll_eh;
 
 #include "diff_algorithms/myers_diff.hpp"
 #include "diff_algorithms/myers_linear_diff.hpp"
@@ -102,21 +105,18 @@ static void frame_post_scroll(yed_event *event);
 extern "C" {
     int yed_plugin_boot(yed_plugin *self) {
         YED_PLUG_VERSION_CHECK();
-int a;
+
     /*     ROW_PRE_CLEAR */
-        yed_event_handler line_base_draw_eh;
         line_base_draw_eh.kind = EVENT_ROW_PRE_CLEAR;
         line_base_draw_eh.fn   = line_base_draw;
         yed_plugin_add_event_handler(self, line_base_draw_eh);
 
     /*     LINE_PRE_DRAW */
-        yed_event_handler line_char_draw_eh;
         line_char_draw_eh.kind = EVENT_LINE_PRE_DRAW;
         line_char_draw_eh.fn   = line_char_draw;
         yed_plugin_add_event_handler(self, line_char_draw_eh);
 
     /*     FRAME_POST_SCROLL */
-        yed_event_handler frame_post_scroll_eh;
         frame_post_scroll_eh.kind = EVENT_FRAME_POST_SCROLL;
         frame_post_scroll_eh.fn   = frame_post_scroll;
         yed_plugin_add_event_handler(self, frame_post_scroll_eh);
@@ -245,6 +245,10 @@ static void unload(yed_plugin *self) {
     diff_m.line_buff[LEFT].clear();
     diff_m.line_buff[RIGHT].clear();
     diff_m.f_diff.clear();
+
+    yed_delete_event_handler(line_base_draw_eh);
+    yed_delete_event_handler(line_char_draw_eh);
+    yed_delete_event_handler(frame_post_scroll_eh);
 }
 
 static int diff_completion(char *name, struct yed_completion_results_t *comp_res) {
