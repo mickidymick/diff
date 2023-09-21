@@ -209,7 +209,7 @@ static int get_or_make_buffers(char *buff_1, char *buff_2) {
     }
     diff_m.buff_orig[RIGHT] = buffer;
 
-    snprintf(tmp_buff, 512, "*diff:%s", buff_1);
+    snprintf(tmp_buff, 512, "*diff:%s", diff_m.buff_orig[LEFT]->name);
     buffer = yed_get_buffer(tmp_buff);
     if (buffer == NULL) {
         buffer = yed_create_buffer(tmp_buff);
@@ -218,7 +218,7 @@ static int get_or_make_buffers(char *buff_1, char *buff_2) {
     diff_m.buff_diff[LEFT] = buffer;
     update_diff_buffer(diff_m.buff_orig[LEFT], diff_m.buff_diff[LEFT]);
 
-    snprintf(tmp_buff, 512, "*diff:%s", buff_2);
+    snprintf(tmp_buff, 512, "*diff:%s", diff_m.buff_orig[RIGHT]->name);
     buffer = yed_get_buffer(tmp_buff);
     if (buffer == NULL) {
         buffer = yed_create_buffer(tmp_buff);
@@ -321,13 +321,12 @@ static void diff(int n_args, char **args) {
         return;
     }
 
-//     min_lines = yed_get_var("diff-min-lines-big-file");
-//     DBG("min:%d", min_lines);
-//     if (yed_buff_n_lines(diff_m.buff_diff[LEFT]) > min_lines || yed_buff_n_lines(diff_m.buff_diff[RIGHT]) > min_lines) {
-//         diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm-big-file");
-//     } else {
+    yed_get_var_as_int("diff-min-lines-big-file", &min_lines);
+    if (yed_buff_n_lines(diff_m.buff_diff[LEFT]) > min_lines || yed_buff_n_lines(diff_m.buff_diff[RIGHT]) > min_lines) {
+        diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm-big-file");
+    } else {
         diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
-//     }
+    }
 
     if (strcmp(diff_multi_line_var, "myers") == 0) {
         DBG("myers");
