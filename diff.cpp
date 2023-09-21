@@ -5,6 +5,7 @@ extern "C" {
 // TODO:
 // --FEATURES
 //   add expand and contract feature for truncated lines
+//   add the ability to make changes to files
 //   maybe add the ability to use the xdiff library instead of the scratch built algs
 //
 // --OPTIMIZATIONS
