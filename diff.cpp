@@ -137,6 +137,14 @@ extern "C" {
             yed_set_var("diff-line-compare-algorithm", "myers");
         }
 
+        if (yed_get_var("diff-min-lines-big-file") == NULL) {
+            yed_set_var("diff-min-lines-big-file", XSTR(5000));
+        }
+
+        if (yed_get_var("diff-multi-line-compare-algorithm-big-file") == NULL) {
+            yed_set_var("diff-multi-line-compare-algorithm-big-file", "myers_linear");
+        }
+
         if (yed_get_var("diff-insert-color") == NULL) {
             yed_set_var("diff-insert-color", "&active &blue swap");
         }
@@ -181,20 +189,20 @@ static int get_or_make_buffers(char *buff_1, char *buff_2) {
     yed_buffer *buffer;
     char        tmp_buff[512];
 
-    buffer = yed_get_buffer(buff_1);
+    buffer = yed_get_buffer_by_path(buff_1);
     if (buffer == NULL) {
         YEXE("buffer-hidden", buff_1);
-        buffer = yed_get_buffer(buff_1);
+        buffer = yed_get_buffer_by_path(buff_1);
         if(buffer == NULL) {
             return 1;
         }
     }
     diff_m.buff_orig[LEFT] = buffer;
 
-    buffer = yed_get_buffer(buff_2);
+    buffer = yed_get_buffer_by_path(buff_2);
     if (buffer == NULL) {
         YEXE("buffer-hidden", buff_2);
-        buffer = yed_get_buffer(buff_2);
+        buffer = yed_get_buffer_by_path(buff_2);
         if(buffer == NULL) {
             return 1;
         }
@@ -283,6 +291,7 @@ static void diff(int n_args, char **args) {
     char *diff_multi_line_var;
     char  tmp_buff_1[512];
     char  tmp_buff_2[512];
+    int   min_lines;
 
     if (n_args != 2) {
         yed_cerr("Expected 2 arguments, two buffer names");
@@ -312,7 +321,14 @@ static void diff(int n_args, char **args) {
         return;
     }
 
-    diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
+//     min_lines = yed_get_var("diff-min-lines-big-file");
+//     DBG("min:%d", min_lines);
+//     if (yed_buff_n_lines(diff_m.buff_diff[LEFT]) > min_lines || yed_buff_n_lines(diff_m.buff_diff[RIGHT]) > min_lines) {
+//         diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm-big-file");
+//     } else {
+        diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
+//     }
+
     if (strcmp(diff_multi_line_var, "myers") == 0) {
         DBG("myers");
         Myers<vector<int>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
