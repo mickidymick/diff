@@ -5,6 +5,8 @@ extern "C" {
     #include <yed/plugin.h>
 }
 
+#define wrap_indx(size, indx) (indx < 0 ? size + indx : indx)
+
 template <class T>
 class Myers {
     public:
@@ -23,15 +25,6 @@ class Myers {
             max   = len_a + len_b;
         }
 
-        // Member Functions
-        int wrap_indx(int size, int indx) {
-            if ( indx < 0 ) {
-                return (size + indx);
-            }
-
-            return indx;
-        }
-
         //Finds the Shortest Edit Path
         vector<vector<int>> shortest_edit(void) {
             int                 x;
@@ -41,7 +34,7 @@ class Myers {
 
             size = 2 * max + 1;
 
-            vector<int> v(2 * max + 1);
+            vector<int> v(size);
             v[1] = 0;
 
             for(int d = 0; d <= max; d++) {
@@ -57,8 +50,8 @@ class Myers {
                     y = x - k;
 
                     while (x < len_a && y < len_b && a[x] == b[y]) {
-                               x++;
-                               y++;
+                        x++;
+                        y++;
                     }
 
                     v[wrap_indx(size, k)] = x;
@@ -73,19 +66,22 @@ class Myers {
 
         void backtrack_yield(int prev_x, int prev_y, int x, int y) {
             if (x == prev_x) {
-                file_diff tmp_line_diff(INS, prev_x + 1, INS, prev_y + 1);
-                f_diff.insert(f_diff.begin(), tmp_line_diff);
+//                 file_diff tmp_line_diff(INS, prev_x + 1, INS, prev_y + 1);
+//                 f_diff.insert(f_diff.begin(), tmp_line_diff);
+                f_diff.emplace(f_diff.begin(), INS, prev_x + 1, INS, prev_y + 1);
             } else if (y == prev_y) {
-                file_diff tmp_line_diff(DEL, prev_x + 1, DEL, prev_y + 1);
-                f_diff.insert(f_diff.begin(), tmp_line_diff);
+//                 file_diff tmp_line_diff(DEL, prev_x + 1, DEL, prev_y + 1);
+//                 f_diff.insert(f_diff.begin(), tmp_line_diff);
+                f_diff.emplace(f_diff.begin(), DEL, prev_x + 1, DEL, prev_y + 1);
             } else {
-                file_diff tmp_line_diff(EQL, prev_x + 1, EQL, prev_y + 1);
-                f_diff.insert(f_diff.begin(), tmp_line_diff);
+//                 file_diff tmp_line_diff(EQL, prev_x + 1, EQL, prev_y + 1);
+//                 f_diff.insert(f_diff.begin(), tmp_line_diff);
+                f_diff.emplace(f_diff.begin(), EQL, prev_x + 1, EQL, prev_y + 1);
             }
         }
 
         //Backtracks the shortest edit path finiding the path
-        void backtrack(vector<vector<int>> trace, int x, int y) {
+        void backtrack(vector<vector<int>> &trace, int x, int y) {
             int         size;
             int         k;
             int         prev_k;
@@ -127,7 +123,6 @@ class Myers {
 
         //Main diff func
         vector<file_diff> diff(void) {
-
             vector<vector<int>> se = shortest_edit();
 
             backtrack(se, len_a, len_b);

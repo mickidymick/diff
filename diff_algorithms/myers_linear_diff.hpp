@@ -28,8 +28,6 @@ class Box {
         }
 };
 
-int num_iter = 0;
-
 class Point {
     public:
         int x = 0;
@@ -73,12 +71,6 @@ class Myers_linear {
             max   = len_a + len_b;
         }
 
-//         double midpoint_tot_time = 0;
-//         double f_tot_time = 0;
-//         double b_tot_time = 0;
-//         double f_w_tot_time = 0;
-//         double b_w_tot_time = 0;
-
         Snake *forwards(Box &box, vector<int> &vf, vector<int> &vb, int &d, int &len) {
             int c;
             int x;
@@ -106,16 +98,12 @@ class Myers_linear {
                 y  = box.top + (x - box.left) - k;
                 py = (d == 0 || x != px) ? y : y - 1;
 
-//                 clock_t tp_f_w = time_start();
                 while (x < box.right
                     && y < box.bottom
-//                     && a[x].size() == b[y].size()
                     && a[x] == b[y]) {
-                    num_iter++;
                     x++;
                     y++;
                 }
-//                 f_w_tot_time += time_stop(tp_f_w);
 
                 vf[wrap_indx(len, k)] = x;
 
@@ -156,16 +144,12 @@ class Myers_linear {
                 x  = box.left + (y - box.top) + k;
                 px = (d == 0 || y != py) ? x : x + 1;
 
-//                 clock_t tp_b_w = time_start();
                 while (x > box.left
                     && y > box.top
-//                     && a[x - 1].size() == b[y - 1].size()
                     && a[x - 1] == b[y - 1]) {
-                    num_iter++;
                     x--;
                     y--;
                 }
-//                 b_w_tot_time += time_stop(tp_b_w);
 
                 vb[wrap_indx(len, c)] = y;
 
@@ -180,9 +164,9 @@ class Myers_linear {
         }
 
         Snake *midpoint(Box &box) {
-            int   tmp_max;
-            int   len;
             Snake *snake;
+            int    tmp_max;
+            int    len;
 
             if (SIZE == 0) {
                 return NULL;
@@ -197,16 +181,12 @@ class Myers_linear {
             vb[1] = box.bottom;
 
             for (int d = 0; d <= tmp_max; d++) {
-//                 clock_t tp_f = time_start();
                 snake = forwards(box, vf, vb, d, len);
-//                 f_tot_time += time_stop(tp_f);
                 if (snake != NULL) {
                     return snake;
                 }
 
-//                 clock_t tp_b = time_start();
                 snake = backwards(box, vf, vb, d, len);
-//                 b_tot_time += time_stop(tp_b);
                 if (snake != NULL) {
                     return snake;
                 }
@@ -222,9 +202,7 @@ class Myers_linear {
             vector<Point> *tail;
 
             Box box = Box(left, top, right, bottom);
-//             clock_t tp_1 = time_start();
             snake   = midpoint(box);
-//             midpoint_tot_time += time_stop(tp_1);
 
             if (snake == NULL) {
                 return NULL;
@@ -260,14 +238,11 @@ class Myers_linear {
             }
 
             if (x1 == x2) {
-                file_diff tmp_line_diff(INS, x1 + 1, INS, y1 + 1);
-                f_diff.push_back(tmp_line_diff);
+                f_diff.emplace_back(INS, x1 + 1, INS, y1 + 1);
             } else if (y1 == y2) {
-                file_diff tmp_line_diff(DEL, x1 + 1, DEL, y1 + 1);
-                f_diff.push_back(tmp_line_diff);
+                f_diff.emplace_back(DEL, x1 + 1, DEL, y1 + 1);
             } else {
-                file_diff tmp_line_diff(EQL, x1 + 1, EQL, y1 + 1);
-                f_diff.push_back(tmp_line_diff);
+                f_diff.emplace_back(EQL, x1 + 1, EQL, y1 + 1);
             }
         }
 
@@ -282,41 +257,32 @@ class Myers_linear {
 
             tmp_arr[0] = x1;
             tmp_arr[1] = y1;
+
             return tmp_arr;
         }
 
         vector<file_diff> diff(void) {
+            vector<Point>    *path;
             int               x1;
             int               y1;
             int               x2;
             int               y2;
-            vector<Point>    *path;
             int               path_len;
             vector<int>       tmp_arr(2);
             vector<file_diff> f_diff;
 
-            clock_t tp_1 = time_start();
             path = find_path(0, 0, len_a, len_b);
-            time_print(time_stop(tp_1), "find_path");
 
-//             time_print(midpoint_tot_time, "midpoint");
-//             time_print(f_tot_time, "forwards");
-//             time_print(b_tot_time, "backwards");
-//             time_print(f_w_tot_time, "forwards w");
-//             time_print(b_w_tot_time, "backwards w");
-
-//             DBG("number of accesses: %d", num_iter);
+            if (path == NULL) {
+                return f_diff;
+            }
 
             path_len = path->size();
+
             if (path_len == 0) {
                 return f_diff;
             }
 
-//             for (int i = 0; i < path_len; i++) {
-//                 DBG("[%d, %d]", path[i][0], path[i][1]);
-//             }
-
-            clock_t tp_2 = time_start();
             for (int i = 0; i < path_len - 1; i++) {
                 x1 = (*path)[i].x;
                 y1 = (*path)[i].y;
@@ -337,7 +303,6 @@ class Myers_linear {
 
                 walk_diagonal(x1, y1, x2, y2, f_diff);
             }
-            time_print(time_stop(tp_2), "walk");
 
             return f_diff;
         }

@@ -5,12 +5,12 @@ extern "C" {
 // TODO:
 // --FEATURES
 //   add expand and contract feature for truncated lines
+//   maybe add the ability to use the xdiff library instead of the scratch built algs
 //
 // --OPTIMIZATIONS
-//   need more speed for sure
 //
 // --BUGS
-//   fix bug in char diff "highlights the entire right line"
+//   (I think this is fixed)  fix bug in char diff "highlights the entire right line"
 
 #define DO_LOG
 #define DBG__XSTR(x) #x
@@ -60,6 +60,8 @@ class file_diff {
 
 typedef struct line_t {
     int         line_type;
+    int         trunc_rows;
+    int         is_expanded;
     int         col_begin[2];
     int         col_end[2];
     vector<int> char_type;
@@ -78,6 +80,7 @@ diff_main diff_m;
 #include "time.hpp"
 #include "diff_algorithms/myers_diff.hpp"
 #include "diff_algorithms/myers_linear_diff.hpp"
+#include "diff_algorithms/patience_diff.hpp"
 
 //Base Yed Plugin Functions
 static int  get_or_make_buffers(char *buff_1, char *buff_2);
@@ -126,7 +129,7 @@ extern "C" {
         yed_plugin_set_completion(self, "diff-compl-arg-1", diff_completion_multiple);
 
         if (yed_get_var("diff-multi-line-compare-algorithm") == NULL) {
-            yed_set_var("diff-multi-line-compare-algorithm", "myers_linear");
+            yed_set_var("diff-multi-line-compare-algorithm", "patience");
         }
 
         if (yed_get_var("diff-line-compare-algorithm") == NULL) {
@@ -226,7 +229,7 @@ static int diff_completion(char *name, struct yed_completion_results_t *comp_res
     array_t                                      list;
     tree_it(yed_buffer_name_t, yed_buffer_ptr_t) buffers_it;
 
-    ret = 0;
+    ret  = 0;
     list = array_make(char *);
 
     tree_traverse(ys->buffers, buffers_it) {
@@ -245,6 +248,7 @@ static int diff_completion(char *name, struct yed_completion_results_t *comp_res
 
 static int diff_completion_multiple(char *name, struct yed_completion_results_t *comp_res) {
     char *tmp[2] = {"file", "diff-compl"};
+
     return yed_complete_multiple(2, tmp, name, comp_res);
 }
 
@@ -292,7 +296,6 @@ static void diff(int n_args, char **args) {
         return;
     }
 
-    clock_t tp_1 = time_start();
     snprintf(tmp_buff_1, 512, "*diff:%s", buff_1);
     snprintf(tmp_buff_2, 512, "*diff:%s", buff_2);
 
@@ -307,9 +310,7 @@ static void diff(int n_args, char **args) {
         yed_cerr("Could not initialize the diff!");
         return;
     }
-    time_print(time_stop(tp_1), "Init");
 
-    clock_t tp_2 = time_start();
     diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
     if (strcmp(diff_multi_line_var, "myers") == 0) {
         DBG("myers");
@@ -318,11 +319,16 @@ static void diff(int n_args, char **args) {
         diff_m.f_diff = myers.diff();
     } else if (strcmp(diff_multi_line_var, "myers_linear") == 0) {
         DBG("myers_linear");
-        Myers_linear<vector<int>> myers(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+        Myers_linear<vector<int>> myers_linear(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
-        diff_m.f_diff = myers.diff();
+        diff_m.f_diff = myers_linear.diff();
+    } else if (strcmp(diff_multi_line_var, "patience") == 0) {
+        DBG("patience");
+        Patience<vector<int>> patience(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+                                    diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
+        Slice slice = Slice(0, patience.len_a, 0, patience.len_b);
+        diff_m.f_diff = patience.diff(slice);
     }
-    time_print(time_stop(tp_2), "Diff algorithm");
 
     if (diff_m.f_diff.size() == 0) {
         yed_cerr("Files were the same!");
@@ -334,9 +340,7 @@ static void diff(int n_args, char **args) {
     YEXE("frame-vsplit");
     YEXE("buffer", diff_m.buff_diff[RIGHT]->name);
 
-    clock_t tp_3 = time_start();
     align_buffers(diff_m.buff_diff[LEFT], diff_m.buff_diff[RIGHT]);
-    time_print(time_stop(tp_3), "align_buffers");
 
     LOG_FN_ENTER();
     yed_log("%s, %s", buff_1, buff_2);
@@ -399,6 +403,12 @@ static int init(void) {
     return 0;
 }
 
+static int expand_truncated_lines(int row) {
+    if (diff_m.lines[row].line_type == TRUNC && diff_m.lines[row].is_expanded == 0) {
+
+    }
+}
+
 static int truncate_lines(int tot_num_rows, int last_row) {
     int min_rows;
     int first_row;
@@ -414,10 +424,10 @@ static int truncate_lines(int tot_num_rows, int last_row) {
 
         if (tot_num_rows > min_rows + 1) {
 
-            first_row              = last_row - tot_num_rows + 1;
-            first_remove_row       = last_row - tot_num_rows + (min_rows / 2) + 1;
-            tot_num_truncate_rows  = tot_num_rows - min_rows;
-            last_remove_row        = last_row - (min_rows / 2);
+            first_row             = last_row - tot_num_rows + 1;
+            first_remove_row      = last_row - tot_num_rows + (min_rows / 2) + 1;
+            tot_num_truncate_rows = tot_num_rows - min_rows;
+            last_remove_row       = last_row - (min_rows / 2);
 
             for (int i = last_remove_row; i >= first_remove_row; i--) {
                 yed_buff_delete_line_no_undo(diff_m.buff_diff[LEFT], i);
@@ -438,7 +448,9 @@ static int truncate_lines(int tot_num_rows, int last_row) {
             }
 
             line tmp_line;
-            tmp_line.line_type = TRUNC;
+            tmp_line.line_type   = TRUNC;
+            tmp_line.trunc_rows  = tot_num_truncate_rows / 2;
+            tmp_line.is_expanded = 0;
             diff_m.lines.push_back(tmp_line);
 
             for (int i = 0; i < min_rows / 2; i++) {
@@ -621,15 +633,10 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
     last_eql_left  = 0;
     last_eql_right = 0;
     if (array_len(diff_m.buff_diff[LEFT]->lines) > loc && array_len(diff_m.buff_diff[RIGHT]->lines) > loc) {
-//         DBG("row:%d", loc);
-//         DBG("%s", yed_get_line_text(diff_m.buff_diff[LEFT], loc));
-//         DBG("%s", yed_get_line_text(diff_m.buff_diff[RIGHT], loc));
         left  = yed_get_line_text(diff_m.buff_diff[LEFT], loc);
         left_len = array_len(yed_buff_get_line(diff_m.buff_diff[LEFT], loc)->chars);
         right = yed_get_line_text(diff_m.buff_diff[RIGHT], loc);
         right_len = array_len(yed_buff_get_line(diff_m.buff_diff[RIGHT], loc)->chars);
-//         DBG("left size:%d", left_len);
-//         DBG("right size:%d", right_len);
 
         vector<file_diff> tmp_file_diff;
         diff_line_var = yed_get_var("diff-line-compare-algorithm");
@@ -637,11 +644,34 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
             Myers<string> myers_r(left, left_len, right, right_len);
             tmp_file_diff = myers_r.diff();
         } else if (strcmp(diff_line_var, "myers_linear") == 0) {
-//             Myers_linear<string> myers_r(left, left_len, right, right_len);
-//             tmp_file_diff = myers_r.diff();
+            vector<int> left_v(left_len);
+            for (int i = 0; i < left_len; i++) {
+                left_v[i] = left[i] - '0';
+            }
+
+            vector<int> right_v(right_len);
+            for (int i = 0; i < right_len; i++) {
+                right_v[i] = right[i] - '0';
+            }
+
+            Myers_linear<vector<int>> myers_r(left_v, left_v.size(), right_v, right_v.size());
+            tmp_file_diff = myers_r.diff();
+        } else if (strcmp(diff_line_var, "patience") == 0) {
+            vector<int> left_v(left_len);
+            for (int i = 0; i < left_len; i++) {
+                left_v[i] = left[i] - '0';
+            }
+
+            vector<int> right_v(right_len);
+            for (int i = 0; i < right_len; i++) {
+                right_v[i] = right[i] - '0';
+            }
+
+            Patience<vector<int>> myers_r(left_v, left_v.size(), right_v, right_v.size());
+            Slice slice = Slice(0, myers_r.len_a, 0, myers_r.len_b);
+            tmp_file_diff = myers_r.diff(slice);
         }
 
-//         DBG("%d", tmp_file_diff.size());
         tmp_line.col_begin[LEFT]  = 0;
         tmp_line.col_begin[RIGHT] = 0;
         tmp_line.col_end[LEFT]    = 0;
@@ -657,7 +687,6 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
                 if (last_eql_left > last_col_del) {
                     last_col_del = last_eql_left;
                 }
-//                 DBG("col:%d INS", tmp_file_diff[c].row_num[RIGHT]);
             } else if (tmp_file_diff[c].type[LEFT] == DEL) {
                 tmp_line.char_type.push_back(DEL);
                 if (tmp_line.col_begin[LEFT] == 0) {
@@ -667,7 +696,6 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
                 if (last_eql_right > last_col_ins) {
                     last_col_ins = last_eql_right;
                 }
-//                 DBG("col:%d DEL", tmp_file_diff[c].row_num[LEFT]);
             } else {
                 if (tmp_line.col_begin[LEFT] != 0
                 && tmp_line.col_begin[RIGHT] == 0) {
@@ -681,14 +709,10 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
                 last_eql_right = tmp_file_diff[c].row_num[RIGHT];
 
                 tmp_line.char_type.push_back(EQL);
-//                 DBG("col:%d EQL", tmp_file_diff[c].row_num[LEFT]);
             }
         }
         tmp_line.col_end[LEFT]  = last_col_del;
         tmp_line.col_end[RIGHT] = last_col_ins;
-//         DBG("LEFT  begin:%d end:%d", tmp_line.col_begin[LEFT], tmp_line.col_end[LEFT]);
-//         DBG("RIGHT begin:%d end:%d", tmp_line.col_begin[RIGHT], tmp_line.col_end[RIGHT]);
-//         DBG("\n");
     }
 }
 
@@ -794,19 +818,15 @@ static void line_char_draw(yed_event *event) {
             if (tmp_line == NULL) { return; }
 
             for (int col = 1; col <= tmp_line->visual_width; col++) {
-//                 DBG("color diff len:%d", diff_m.lines[event->row].char_type.size());
                 if (diff_m.lines[event->row].char_type.size() < col) {
                     return;
                 }
 
-//                 DBG("beg:%d col:%d end:%d", diff_m.lines[event->row].col_begin[LEFT], col,
-//                                             diff_m.lines[event->row].col_end[LEFT]);
                 if (col >= diff_m.lines[event->row].col_begin[LEFT]
                 && col <= diff_m.lines[event->row].col_end[LEFT]) {
                     if ((color_var = yed_get_var("diff-inner-compare-char-color"))) {
                         tmp_attr   = yed_parse_attrs(color_var);
                     }
-//                     DBG("red r:%d c:%d\n", event->row, col);
 
                     if (diff_m.buff_diff[LEFT]->has_selection) {
                         if (diff_m.buff_diff[LEFT]->selection.anchor_row < diff_m.buff_diff[LEFT]->selection.cursor_row) {
@@ -852,7 +872,6 @@ static void line_char_draw(yed_event *event) {
             if (tmp_line == NULL) { return; }
 
             for (int col = 1; col <= tmp_line->visual_width; col++) {
-//                 DBG("color diff len:%d", diff_m.lines[event->row].char_type.size());
                 if (diff_m.lines[event->row].char_type.size() < col) {
                     return;
                 }
@@ -862,7 +881,6 @@ static void line_char_draw(yed_event *event) {
                     if ((color_var = yed_get_var("diff-inner-compare-char-color"))) {
                         tmp_attr   = yed_parse_attrs(color_var);
                     }
-//                     DBG("red r:%d c:%d\n", event->row, col);
 
                     if (diff_m.buff_diff[RIGHT]->has_selection) {
                         if (diff_m.buff_diff[RIGHT]->selection.anchor_row < diff_m.buff_diff[RIGHT]->selection.cursor_row) {
@@ -909,9 +927,7 @@ bool scrolling_others = false;
 static void frame_post_scroll(yed_event *event) {
     yed_frame_tree *p;
     yed_frame_tree *other_child;
-    int current_row;
-
-    DBG("woo");
+    int             current_row;
 
     if (scrolling_others) {
         return;
@@ -934,17 +950,10 @@ static void frame_post_scroll(yed_event *event) {
         return;
     }
 
-    p = event->frame->tree->parent;
+    p           = event->frame->tree->parent;
     other_child = p->child_trees[event->frame->tree == p->child_trees[0]];
 
     scrolling_others = true;
-
-    yed_log(" \n");
-    yed_log("B LEFT  y-offset:%d\n",   p->child_trees[0]->frame->buffer_y_offset);
-    yed_log("B RIGHT y-offset:%d\n", p->child_trees[1]->frame->buffer_y_offset);
     yed_frame_scroll_buffer(other_child->frame, event->frame->buffer_y_offset - other_child->frame->buffer_y_offset);
-    yed_log(" \n");
-    yed_log("A LEFT  y-offset:%d\n",   p->child_trees[0]->frame->buffer_y_offset);
-    yed_log("A RIGHT y-offset:%d\n\n", p->child_trees[1]->frame->buffer_y_offset);
     scrolling_others = false;
 }
