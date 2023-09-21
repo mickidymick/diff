@@ -132,7 +132,7 @@ extern "C" {
         }
 
         if (yed_get_var("diff-line-compare-algorithm") == NULL) {
-            yed_set_var("diff-line-compare-algorithm", "myers");
+            yed_set_var("diff-line-compare-algorithm", "patience");
         }
 
         if (yed_get_var("diff-min-lines-big-file") == NULL) {
