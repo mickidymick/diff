@@ -362,6 +362,8 @@ static void diff(int n_args, char **args) {
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         Slice slice = Slice(0, patience.len_a, 0, patience.len_b);
         diff_m.f_diff = patience.diff(slice);
+    } else if (strcmp(diff_multi_line_var, "xdiff") == 0) {
+        DBG("woo");
     }
 
     if (diff_m.f_diff.size() == 0) {
