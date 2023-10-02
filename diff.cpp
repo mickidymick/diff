@@ -231,14 +231,18 @@ static int get_or_make_buffers(char *buff_1, char *buff_2) {
 static void unload(yed_plugin *self) {
     yed_buffer_ptr_t buffer;
 
-    buffer = yed_get_buffer(diff_m.buff_diff[LEFT]->name);
-    if (buffer != NULL) {
-        yed_free_buffer(buffer);
+    if (diff_m.buff_diff[LEFT] != NULL) {
+        buffer = yed_get_buffer(diff_m.buff_diff[LEFT]->name);
+        if (buffer != NULL) {
+            yed_free_buffer(buffer);
+        }
     }
 
-    buffer = yed_get_buffer(diff_m.buff_diff[RIGHT]->name);
-    if (buffer != NULL) {
-        yed_free_buffer(buffer);
+    if (diff_m.buff_diff[RIGHT] != NULL) {
+        buffer = yed_get_buffer(diff_m.buff_diff[RIGHT]->name);
+        if (buffer != NULL) {
+            yed_free_buffer(buffer);
+        }
     }
 
     diff_m.lines.clear();
