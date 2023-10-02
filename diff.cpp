@@ -83,6 +83,7 @@ yed_event_handler frame_post_scroll_eh;
 #include "diff_algorithms/myers_diff.hpp"
 #include "diff_algorithms/myers_linear_diff.hpp"
 #include "diff_algorithms/patience_diff.hpp"
+#include "xdiff/xdiff.h"
 
 //Base Yed Plugin Functions
 static int  get_or_make_buffers(char *buff_1, char *buff_2);
@@ -363,7 +364,18 @@ static void diff(int n_args, char **args) {
         Slice slice = Slice(0, patience.len_a, 0, patience.len_b);
         diff_m.f_diff = patience.diff(slice);
     } else if (strcmp(diff_multi_line_var, "xdiff") == 0) {
-        DBG("woo");
+        DBG("xdiff");
+
+        mmfile_t           *file_1;
+        mmfile_t           *file_2;
+        const xpparam_t    *params;
+        const xdemitconf_t *conf;
+        const xdemitcb_t   *cb;
+
+        long bsize = 1024;
+        long flags = 0;
+        xdl_init_mmfile(file_1, bsize, flags);
+        xdl_diff(file_1, file_2, params, conf, cb);
     }
 
     if (diff_m.f_diff.size() == 0) {
