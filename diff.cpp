@@ -4,11 +4,10 @@ extern "C" {
 
 // TODO:
 // --FEATURES
-//   add expand and contract feature for truncated lines
 //   add the ability to make changes to files
-//   maybe add the ability to use the xdiff library instead of the scratch built algs
 //
 // --OPTIMIZATIONS
+//   maybe add the ability to use the xdiff library instead of the scratch built algs
 //
 // --BUGS
 //   (I think this is fixed)  fix bug in char diff "highlights the entire right line"
@@ -27,7 +26,7 @@ do {                                                       \
 #define DBG(...) ;
 #endif
 
-#include <string>
+// #include <string>
 #include <vector>
 #include <unordered_map>
 #include <map>
