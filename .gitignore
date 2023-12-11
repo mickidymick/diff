@@ -2,3 +2,4 @@
 *.so
 ruby/
 ruby_2/
+.ccls-cache
