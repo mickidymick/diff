@@ -4,11 +4,10 @@ extern "C" {
 
 // TODO:
 // --FEATURES
-//   add expand and contract feature for truncated lines
 //   add the ability to make changes to files
-//   maybe add the ability to use the xdiff library instead of the scratch built algs
 //
 // --OPTIMIZATIONS
+//   maybe add the ability to use the xdiff library instead of the scratch built algs
 //
 // --BUGS
 //   (I think this is fixed)  fix bug in char diff "highlights the entire right line"
@@ -27,10 +26,12 @@ do {                                                       \
 #define DBG(...) ;
 #endif
 
-#include <string>
+// #include <string>
 #include <vector>
 #include <unordered_map>
 #include <map>
+#include "libxdiff-0.23/xdiff/xdiff.h"
+#include "xtestutils.h"
 
 using namespace std;
 
@@ -44,6 +45,7 @@ using namespace std;
 #define CHG   (4)
 #define NUL   (5)
 #define TRUNC (7)
+#define EXPND (8)
 
 class file_diff {
     public:
@@ -59,12 +61,13 @@ class file_diff {
 };
 
 typedef struct line_t {
-    int         line_type;
-    int         trunc_rows;
-    int         is_expanded;
-    int         col_begin[2];
-    int         col_end[2];
-    vector<int> char_type;
+    int           line_type;
+    int           trunc_rows;
+    int           is_expanded;
+    int           col_begin[2];
+    int           col_end[2];
+    vector<int>   char_type;
+    vector<char*> saved_lines;
 } line;
 
 typedef struct diff_main_t {
@@ -79,11 +82,11 @@ diff_main         diff_m;
 yed_event_handler line_base_draw_eh;
 yed_event_handler line_char_draw_eh;
 yed_event_handler frame_post_scroll_eh;
+int               use_dashes;
 
 #include "diff_algorithms/myers_diff.hpp"
 #include "diff_algorithms/myers_linear_diff.hpp"
 #include "diff_algorithms/patience_diff.hpp"
-#include "xdiff/xdiff.h"
 
 //Base Yed Plugin Functions
 static int  get_or_make_buffers(char *buff_1, char *buff_2);
@@ -95,6 +98,8 @@ static void clear_buffers(char* b1, char* b2, char* b3, char* b4);
 //Diff Functions
 static void diff(int n_args, char **args);
 static int  init(void);
+static void expand_truncated_lines(int nargs, char **args);
+static void contract_truncated_lines(int nargs, char **args);
 static int  truncate_lines(int num_cont_eql_rows, int last_eql_row);
 static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2);
 static void diff_adjacent_line(line &tmp_line, int loc);
@@ -102,6 +107,7 @@ static void update_diff_buffer(yed_buffer_ptr_t buff_orig, yed_buffer_ptr_t buff
 static void line_base_draw(yed_event *event);
 static void line_char_draw(yed_event *event);
 static void frame_post_scroll(yed_event *event);
+static void xdiff_init(void);
 
 extern "C" {
     int yed_plugin_boot(yed_plugin *self) {
@@ -124,6 +130,8 @@ extern "C" {
 
         yed_plugin_set_unload_fn(self, unload);
         yed_plugin_set_command(self, "diff", diff);
+        yed_plugin_set_command(self, "diff-expand-truncated-lines", expand_truncated_lines);
+        yed_plugin_set_command(self, "diff-contract-truncated-lines", contract_truncated_lines);
         yed_plugin_set_completion(self, "diff-compl", diff_completion);
         yed_plugin_set_completion(self, "diff-compl-arg-0", diff_completion_multiple);
         yed_plugin_set_completion(self, "diff-compl-arg-1", diff_completion_multiple);
@@ -232,14 +240,18 @@ static int get_or_make_buffers(char *buff_1, char *buff_2) {
 static void unload(yed_plugin *self) {
     yed_buffer_ptr_t buffer;
 
-    buffer = yed_get_buffer(diff_m.buff_diff[LEFT]->name);
-    if (buffer != NULL) {
-        yed_free_buffer(buffer);
+    if (diff_m.buff_diff[LEFT] != NULL) {
+        buffer = yed_get_buffer(diff_m.buff_diff[LEFT]->name);
+        if (buffer != NULL) {
+            yed_free_buffer(buffer);
+        }
     }
 
-    buffer = yed_get_buffer(diff_m.buff_diff[RIGHT]->name);
-    if (buffer != NULL) {
-        yed_free_buffer(buffer);
+    if (diff_m.buff_diff[RIGHT] != NULL) {
+        buffer = yed_get_buffer(diff_m.buff_diff[RIGHT]->name);
+        if (buffer != NULL) {
+            yed_free_buffer(buffer);
+        }
     }
 
     diff_m.lines.clear();
@@ -343,8 +355,10 @@ static void diff(int n_args, char **args) {
     yed_get_var_as_int("diff-min-lines-big-file", &min_lines);
     if (yed_buff_n_lines(diff_m.buff_diff[LEFT]) > min_lines || yed_buff_n_lines(diff_m.buff_diff[RIGHT]) > min_lines) {
         diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm-big-file");
+        use_dashes = 0;
     } else {
         diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
+        use_dashes = 1;
     }
 
     if (strcmp(diff_multi_line_var, "myers") == 0) {
@@ -363,19 +377,6 @@ static void diff(int n_args, char **args) {
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         Slice slice = Slice(0, patience.len_a, 0, patience.len_b);
         diff_m.f_diff = patience.diff(slice);
-    } else if (strcmp(diff_multi_line_var, "xdiff") == 0) {
-        DBG("xdiff");
-
-        mmfile_t           *file_1;
-        mmfile_t           *file_2;
-        const xpparam_t    *params;
-        const xdemitconf_t *conf;
-        const xdemitcb_t   *cb;
-
-        long bsize = 1024;
-        long flags = 0;
-        xdl_init_mmfile(file_1, bsize, flags);
-        xdl_diff(file_1, file_2, params, conf, cb);
     }
 
     if (diff_m.f_diff.size() == 0) {
@@ -453,9 +454,95 @@ static int init(void) {
     return 0;
 }
 
-static int expand_truncated_lines(int row) {
-    if (diff_m.lines[row].line_type == TRUNC && diff_m.lines[row].is_expanded == 0) {
+static void expand_truncated_lines(int nargs, char **args) {
+    yed_frame              *frame;
+    char                   *tmp;
+    int                     row;
+    int                     j;
+    vector<line>::iterator  it;
 
+    frame = ys->active_frame;
+
+    if (!frame
+    ||  !frame->buffer) {
+        return;
+    }
+
+    row = frame->cursor_line;
+
+    if (diff_m.lines[row].line_type == TRUNC && diff_m.lines[row].is_expanded == 0) {
+        it = diff_m.lines.begin();
+        j = 1;
+
+        for(int i = diff_m.lines[row].saved_lines.size()-1; i >= 0; i--) {
+            line tmp_line;
+            tmp_line.line_type = EQL;
+            yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT], row+j);
+            yed_buff_insert_string(diff_m.buff_diff[LEFT], diff_m.lines[row].saved_lines[i], row+j, 1);
+            yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT], row+j);
+            yed_buff_insert_string(diff_m.buff_diff[RIGHT], diff_m.lines[row].saved_lines[i], row+j, 1);
+            diff_m.lines.insert(it + row + j, tmp_line);
+            j++;
+        }
+
+        char trunc_str[35];
+        char *pos;
+
+        tmp = yed_get_line_text(diff_m.buff_diff[LEFT], row);
+        pos = strchr(tmp, ':');
+
+        strncpy(trunc_str, tmp, pos - tmp);
+        strcpy(trunc_str + (pos - tmp), ": Expanded");
+
+        yed_line_clear_no_undo(diff_m.buff_diff[LEFT], row);
+        yed_buff_insert_string(diff_m.buff_diff[LEFT], trunc_str, row, 1);
+        yed_line_clear_no_undo(diff_m.buff_diff[RIGHT], row);
+        yed_buff_insert_string(diff_m.buff_diff[RIGHT], trunc_str, row, 1);
+
+        diff_m.lines[row].is_expanded = 1;
+    }
+}
+
+static void contract_truncated_lines(int nargs, char **args) {
+    yed_frame              *frame;
+    char                   *tmp;
+    int                     row;
+    int                     j;
+    vector<line>::iterator  it;
+
+    frame = ys->active_frame;
+
+    if (!frame
+    ||  !frame->buffer) {
+        return;
+    }
+
+    row = frame->cursor_line;
+
+    if (diff_m.lines[row].line_type == TRUNC && diff_m.lines[row].is_expanded == 1) {
+        it = diff_m.lines.begin();
+
+        for (int i = diff_m.lines[row].trunc_rows + row; i >= row + 1; i--) {
+            yed_buff_delete_line_no_undo(diff_m.buff_diff[LEFT], i);
+            yed_buff_delete_line_no_undo(diff_m.buff_diff[RIGHT], i);
+            diff_m.lines.erase(it + i);
+        }
+
+        char trunc_str[35];
+        char *pos;
+
+        tmp = yed_get_line_text(diff_m.buff_diff[LEFT], row);
+        pos = strchr(tmp, ':');
+
+        strncpy(trunc_str, tmp, pos - tmp);
+        strcpy(trunc_str + (pos - tmp), ": Truncated");
+
+        yed_line_clear_no_undo(diff_m.buff_diff[LEFT], row);
+        yed_buff_insert_string(diff_m.buff_diff[LEFT], trunc_str, row, 1);
+        yed_line_clear_no_undo(diff_m.buff_diff[RIGHT], row);
+        yed_buff_insert_string(diff_m.buff_diff[RIGHT], trunc_str, row, 1);
+
+        diff_m.lines[row].is_expanded = 0;
     }
 }
 
@@ -465,6 +552,7 @@ static int truncate_lines(int tot_num_rows, int last_row) {
     int first_remove_row;
     int last_remove_row;
     int tot_num_truncate_rows;
+    vector<char*> tmp_saved_lines;
 
     if (yed_var_is_truthy("diff-truncate-lines")) {
         yed_get_var_as_int("diff-truncate-lines-min-num", &min_rows);
@@ -480,12 +568,13 @@ static int truncate_lines(int tot_num_rows, int last_row) {
             last_remove_row       = last_row - (min_rows / 2);
 
             for (int i = last_remove_row; i >= first_remove_row; i--) {
+                tmp_saved_lines.push_back(yed_get_line_text(diff_m.buff_diff[LEFT], i));
                 yed_buff_delete_line_no_undo(diff_m.buff_diff[LEFT], i);
                 yed_buff_delete_line_no_undo(diff_m.buff_diff[RIGHT], i);
             }
 
-            char trunc_str[25];
-            snprintf(trunc_str, 25, "------ %d lines: char");
+            char trunc_str[35];
+            snprintf(trunc_str, 35, "------ %d lines: Truncated", tot_num_truncate_rows);
             yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT], first_remove_row);
             yed_buff_insert_string(diff_m.buff_diff[LEFT], trunc_str, first_remove_row, 1);
             yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT], first_remove_row);
@@ -499,8 +588,9 @@ static int truncate_lines(int tot_num_rows, int last_row) {
 
             line tmp_line;
             tmp_line.line_type   = TRUNC;
-            tmp_line.trunc_rows  = tot_num_truncate_rows / 2;
+            tmp_line.trunc_rows  = tot_num_truncate_rows;
             tmp_line.is_expanded = 0;
+            tmp_line.saved_lines = tmp_saved_lines;
             diff_m.lines.push_back(tmp_line);
 
             for (int i = 0; i < min_rows / 2; i++) {
@@ -534,8 +624,8 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
     line init_line;
     init_line.line_type = INIT;
 
-//     char dashes[7];
-//     memset(dashes, '-', 6);
+    char dashes[201];
+    memset(dashes, '-', 200);
 
     diff_m.lines.clear();
     diff_m.lines.push_back(std::move(init_line));
@@ -581,8 +671,10 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                     line tmp_line;
                     yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT],
                         diff_m.f_diff[i].row_num[RIGHT] + right_added_row - num_truncated_rows);
-//                     yed_buff_insert_string(diff_m.buff_diff[RIGHT],
-//                         dashes, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - num_truncated_rows, 1);
+                    if (use_dashes) {
+                        yed_buff_insert_string(diff_m.buff_diff[RIGHT],
+                            dashes, diff_m.f_diff[i].row_num[RIGHT] + right_added_row - num_truncated_rows, 1);
+                    }
                     right_added_row++;
                     tmp_line.line_type = DEL;
                     diff_m.lines.push_back(std::move(tmp_line));
@@ -599,8 +691,10 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
                     line tmp_line;
                     yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT],
                         diff_m.f_diff[i].row_num[LEFT] + left_added_row - num_truncated_rows);
-//                     yed_buff_insert_string(diff_m.buff_diff[LEFT],
-//                         dashes, diff_m.f_diff[i].row_num[LEFT] + left_added_row - num_truncated_rows, 1);
+                    if (use_dashes) {
+                        yed_buff_insert_string(diff_m.buff_diff[LEFT],
+                            dashes, diff_m.f_diff[i].row_num[LEFT] + left_added_row - num_truncated_rows, 1);
+                    }
                     left_added_row++;
                     tmp_line.line_type = INS;
                     diff_m.lines.push_back(std::move(tmp_line));
@@ -633,8 +727,10 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
             line tmp_line;
             yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT],
                 diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - num_truncated_rows);
-//             yed_buff_insert_string(diff_m.buff_diff[RIGHT],
-//                 dashes, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - num_truncated_rows, 1);
+            if (use_dashes) {
+                yed_buff_insert_string(diff_m.buff_diff[RIGHT],
+                    dashes, diff_m.f_diff[save_i].row_num[RIGHT] + right_added_row - num_truncated_rows, 1);
+            }
             right_added_row++;
             tmp_line.line_type = DEL;
             diff_m.lines.push_back(std::move(tmp_line));
@@ -651,8 +747,10 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
             line tmp_line;
             yed_buff_insert_line_no_undo(diff_m.buff_diff[LEFT],
                 diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - num_truncated_rows);
-//             yed_buff_insert_string(diff_m.buff_diff[LEFT],
-//                 dashes, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - num_truncated_rows, 1);
+            if (use_dashes) {
+                yed_buff_insert_string(diff_m.buff_diff[LEFT],
+                    dashes, diff_m.f_diff[save_i].row_num[LEFT] + left_added_row - num_truncated_rows, 1);
+            }
             left_added_row++;
             tmp_line.line_type = INS;
             diff_m.lines.push_back(std::move(tmp_line));
@@ -1006,4 +1104,85 @@ static void frame_post_scroll(yed_event *event) {
     scrolling_others = true;
     yed_frame_scroll_buffer(other_child->frame, event->frame->buffer_y_offset - other_child->frame->buffer_y_offset);
     scrolling_others = false;
+}
+
+
+
+static void *wrap_malloc(void *priv, unsigned int size) {
+
+	return malloc(size);
+}
+
+
+static void wrap_free(void *priv, void *ptr) {
+
+	free(ptr);
+}
+
+
+static void *wrap_realloc(void *priv, void *ptr, unsigned int size) {
+
+	return realloc(ptr, size);
+}
+
+static int xdlt_outf(void *priv, mmbuffer_t *mb, int nbuf) {
+    int i;
+    for (i = 0; i < nbuf; i++) {
+        if (!fwrite(mb[i].ptr, mb[i].size, 1, (FILE *) priv)) {
+            return -1;
+        }
+        return 0;
+    }
+}
+
+static void xdiff_init(void) {
+    int ctxlen     = 3;
+    int bsize      = 16;
+    int do_diff    = 1;
+    int do_patch   = 0;
+    int do_bdiff   = 1;
+    int do_bpatch  = 0;
+    int do_rabdiff = 0;
+
+	memallocator_t malt;
+	mmfile_t       mf1;
+    mmfile_t       mf2;
+	xpparam_t      xpp;
+	xdemitconf_t   xecfg;
+	bdiffparam_t   bdp;
+	xdemitcb_t     ecb;
+    xdemitcb_t     rjecb;
+
+	malt.priv    = NULL;
+	malt.malloc  = wrap_malloc;
+	malt.free    = wrap_free;
+	malt.realloc = wrap_realloc;
+
+	xdl_set_allocator(&malt);
+
+	xpp.flags    = 0;
+	xecfg.ctxlen = ctxlen;
+	bdp.bsize    = bsize;
+
+	if (xdlt_load_mmfile(diff_m.buff_orig[LEFT]->path, &mf1, do_bdiff) < 0) {
+		DBG("Error: Couldn't load first file!");
+        return;
+	}
+	if (xdlt_load_mmfile(diff_m.buff_orig[RIGHT]->path, &mf2, do_bdiff) < 0) {
+		xdl_free_mmfile(&mf1);
+		DBG("Error: Couldn't load second file!");
+        return;
+	}
+
+	if (do_diff) {
+		ecb.priv = stdout;
+		ecb.outf = xdlt_outf;
+
+		if (xdl_diff(&mf1, &mf2, &xpp, &xecfg, &ecb) < 0) {
+			xdl_free_mmfile(&mf2);
+			xdl_free_mmfile(&mf1);
+    		DBG("Error: Couldn't diff files!");
+			return;
+		}
+    }
 }
