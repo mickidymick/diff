@@ -26,7 +26,7 @@ do {                                                       \
 #define DBG(...) ;
 #endif
 
-// #include <string>
+#include <string>
 #include <vector>
 #include <unordered_map>
 #include <map>
