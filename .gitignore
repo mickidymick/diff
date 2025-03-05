@@ -1,5 +1,5 @@
-*.yedrc
 *.so
-ruby/
-ruby_2/
+.yedrc
 .ccls-cache
+compile_commands.json
+test
