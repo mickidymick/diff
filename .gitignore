@@ -2,4 +2,5 @@
 .yedrc
 .ccls-cache
 compile_commands.json
-test
+debug_build.sh
+tests
