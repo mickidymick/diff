@@ -62,6 +62,8 @@ class Myers {
                     }
                 }
             }
+
+            return trace;
         }
 
         void backtrack_yield(int prev_x, int prev_y, int x, int y) {
@@ -76,18 +78,17 @@ class Myers {
 
         //Backtracks the shortest edit path finiding the path
         void backtrack(vector<vector<int>> &trace, int x, int y) {
-            int         size;
-            int         k;
-            int         prev_k;
-            int         prev_x;
-            int         prev_y;
-            vector<int> v;
+            int size;
+            int k;
+            int prev_k;
+            int prev_x;
+            int prev_y;
 
             size = 2 * max + 1;
 
             for (int d = trace.size() - 1; d >= 0; d--) {
 
-                v = trace[d];
+                const vector<int> &v = trace[d];
                 k = x - y;
 
                 if ( k == -d || (k != d

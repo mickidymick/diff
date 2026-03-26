@@ -64,7 +64,6 @@ typedef struct line_t {
     int           is_expanded;
     int           col_begin[2];
     int           col_end[2];
-    vector<int>   char_type;
     vector<char*> saved_lines;
 } line;
 
@@ -74,19 +73,33 @@ typedef struct diff_main_t {
     vector<line>      lines;
     vector<int>       line_buff[2];
     vector<file_diff> f_diff;
+    yed_attrs         attr_insert;
+    yed_attrs         attr_insert_dashes;
+    yed_attrs         attr_delete;
+    yed_attrs         attr_delete_dashes;
+    yed_attrs         attr_inner_compare;
+    yed_attrs         attr_inner_compare_char;
+    yed_attrs         attr_trunc;
+    bool              active;
 } diff_main;
 
 diff_main         diff_m;
 yed_event_handler line_base_draw_eh;
 yed_event_handler line_char_draw_eh;
 yed_event_handler frame_post_scroll_eh;
+yed_event_handler style_change_eh;
 int               use_dashes;
+
+struct LineEntry { int count_a, count_b, idx_a, idx_b; };
 
 #include "diff_algorithms/myers_diff.hpp"
 #include "diff_algorithms/myers_linear_diff.hpp"
 #include "diff_algorithms/patience_diff.hpp"
+#include "diff_algorithms/histogram_diff.hpp"
 
 //Base Yed Plugin Functions
+static void cache_draw_attrs(void);
+static void style_change_handler(yed_event *event);
 static int  get_or_make_buffers(char *buff_1, char *buff_2);
 static void unload(yed_plugin *self);
 static  int diff_completion(char *name, struct yed_completion_results_t *comp_res);
@@ -125,6 +138,11 @@ extern "C" {
         frame_post_scroll_eh.fn   = frame_post_scroll;
         yed_plugin_add_event_handler(self, frame_post_scroll_eh);
 
+    /*     STYLE_CHANGE */
+        style_change_eh.kind = EVENT_STYLE_CHANGE;
+        style_change_eh.fn   = style_change_handler;
+        yed_plugin_add_event_handler(self, style_change_eh);
+
         yed_plugin_set_unload_fn(self, unload);
         yed_plugin_set_command(self, "diff", diff);
         yed_plugin_set_command(self, "diff-expand-truncated-lines", expand_truncated_lines);
@@ -134,11 +152,11 @@ extern "C" {
         yed_plugin_set_completion(self, "diff-compl-arg-1", diff_completion_multiple);
 
         if (yed_get_var("diff-multi-line-compare-algorithm") == NULL) {
-            yed_set_var("diff-multi-line-compare-algorithm", "patience");
+            yed_set_var("diff-multi-line-compare-algorithm", "histogram");
         }
 
         if (yed_get_var("diff-line-compare-algorithm") == NULL) {
-            yed_set_var("diff-line-compare-algorithm", "patience");
+            yed_set_var("diff-line-compare-algorithm", "histogram");
         }
 
         if (yed_get_var("diff-min-lines-big-file") == NULL) {
@@ -146,7 +164,7 @@ extern "C" {
         }
 
         if (yed_get_var("diff-multi-line-compare-algorithm-big-file") == NULL) {
-            yed_set_var("diff-multi-line-compare-algorithm-big-file", "myers_linear");
+            yed_set_var("diff-multi-line-compare-algorithm-big-file", "histogram");
         }
 
         if (yed_get_var("diff-insert-color") == NULL) {
@@ -185,8 +203,25 @@ extern "C" {
             yed_set_var("diff-truncate-lines-min-num", XSTR(12));
         }
 
+        cache_draw_attrs();
+
         return 0;
     }
+}
+
+static void cache_draw_attrs(void) {
+    char *v;
+    if ((v = yed_get_var("diff-insert-color")))             { diff_m.attr_insert             = yed_parse_attrs(v); }
+    if ((v = yed_get_var("diff-insert-dashes-color")))      { diff_m.attr_insert_dashes      = yed_parse_attrs(v); }
+    if ((v = yed_get_var("diff-delete-color")))             { diff_m.attr_delete             = yed_parse_attrs(v); }
+    if ((v = yed_get_var("diff-delete-dashes-color")))      { diff_m.attr_delete_dashes      = yed_parse_attrs(v); }
+    if ((v = yed_get_var("diff-inner-compare-color")))      { diff_m.attr_inner_compare      = yed_parse_attrs(v); }
+    if ((v = yed_get_var("diff-inner-compare-char-color"))) { diff_m.attr_inner_compare_char = yed_parse_attrs(v); }
+    if ((v = yed_get_var("diff-trunc-color")))              { diff_m.attr_trunc              = yed_parse_attrs(v); }
+}
+
+static void style_change_handler(yed_event *event) {
+    cache_draw_attrs();
 }
 
 static int get_or_make_buffers(char *buff_1, char *buff_2) {
@@ -251,6 +286,7 @@ static void unload(yed_plugin *self) {
         }
     }
 
+    diff_m.active = false;
     diff_m.lines.clear();
     diff_m.line_buff[LEFT].clear();
     diff_m.line_buff[RIGHT].clear();
@@ -259,6 +295,7 @@ static void unload(yed_plugin *self) {
     yed_delete_event_handler(line_base_draw_eh);
     yed_delete_event_handler(line_char_draw_eh);
     yed_delete_event_handler(frame_post_scroll_eh);
+    yed_delete_event_handler(style_change_eh);
 }
 
 static int diff_completion(char *name, struct yed_completion_results_t *comp_res) {
@@ -319,7 +356,7 @@ static void diff(int n_args, char **args) {
     char *diff_multi_line_var;
     char  tmp_buff_1[512];
     char  tmp_buff_2[512];
-    int   min_lines;
+    int   min_lines = 5000;
 
     if (n_args != 2) {
         yed_cerr("Expected 2 arguments, two buffer names");
@@ -333,6 +370,8 @@ static void diff(int n_args, char **args) {
         yed_cerr("The two buffers must be different!");
         return;
     }
+
+    cache_draw_attrs();
 
     snprintf(tmp_buff_1, 512, "*diff:%s", buff_1);
     snprintf(tmp_buff_2, 512, "*diff:%s", buff_2);
@@ -352,9 +391,11 @@ static void diff(int n_args, char **args) {
     yed_get_var_as_int("diff-min-lines-big-file", &min_lines);
     if (yed_buff_n_lines(diff_m.buff_diff[LEFT]) > min_lines || yed_buff_n_lines(diff_m.buff_diff[RIGHT]) > min_lines) {
         diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm-big-file");
+        if (diff_multi_line_var == NULL) { diff_multi_line_var = "histogram"; }
         use_dashes = 0;
     } else {
         diff_multi_line_var = yed_get_var("diff-multi-line-compare-algorithm");
+        if (diff_multi_line_var == NULL) { diff_multi_line_var = "histogram"; }
         use_dashes = 1;
     }
 
@@ -374,6 +415,12 @@ static void diff(int n_args, char **args) {
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         Slice slice = Slice(0, patience.len_a, 0, patience.len_b);
         diff_m.f_diff = patience.diff(slice);
+    } else if (strcmp(diff_multi_line_var, "histogram") == 0) {
+        DBG("histogram");
+        Histogram<vector<int>> histogram(diff_m.line_buff[LEFT], diff_m.line_buff[LEFT].size(),
+                                    diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
+        Slice slice = Slice(0, histogram.len_a, 0, histogram.len_b);
+        diff_m.f_diff = histogram.diff(slice);
     }
 
     if (diff_m.f_diff.size() == 0) {
@@ -388,6 +435,7 @@ static void diff(int n_args, char **args) {
 
     align_buffers(diff_m.buff_diff[LEFT], diff_m.buff_diff[RIGHT]);
 
+    diff_m.active = true;
     diff_m.f_diff.clear();
 
     LOG_FN_ENTER();
@@ -623,6 +671,7 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
 
     char dashes[201];
     memset(dashes, '-', 200);
+    dashes[200] = '\0';
 
     diff_m.lines.clear();
     diff_m.lines.push_back(std::move(init_line));
@@ -812,9 +861,23 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
                 right_v[i] = right[i] - '0';
             }
 
-            Patience<vector<int>> myers_r(left_v, left_v.size(), right_v, right_v.size());
-            Slice slice = Slice(0, myers_r.len_a, 0, myers_r.len_b);
-            tmp_file_diff = myers_r.diff(slice);
+            Patience<vector<int>> patience_r(left_v, left_v.size(), right_v, right_v.size());
+            Slice slice = Slice(0, patience_r.len_a, 0, patience_r.len_b);
+            tmp_file_diff = patience_r.diff(slice);
+        } else if (strcmp(diff_line_var, "histogram") == 0) {
+            vector<int> left_v(left_len);
+            for (int i = 0; i < left_len; i++) {
+                left_v[i] = left[i] - '0';
+            }
+
+            vector<int> right_v(right_len);
+            for (int i = 0; i < right_len; i++) {
+                right_v[i] = right[i] - '0';
+            }
+
+            Histogram<vector<int>> histogram_r(left_v, left_v.size(), right_v, right_v.size());
+            Slice slice = Slice(0, histogram_r.len_a, 0, histogram_r.len_b);
+            tmp_file_diff = histogram_r.diff(slice);
         }
 
         tmp_line.col_begin[LEFT]  = 0;
@@ -824,7 +887,6 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
 
         for (int c = 0; c < tmp_file_diff.size(); c++) {
             if (tmp_file_diff[c].type[RIGHT] == INS) {
-                tmp_line.char_type.push_back(INS);
                 if (tmp_line.col_begin[RIGHT] == 0) {
                     tmp_line.col_begin[RIGHT] = tmp_file_diff[c].row_num[RIGHT];
                 }
@@ -833,7 +895,6 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
                     last_col_del = last_eql_left;
                 }
             } else if (tmp_file_diff[c].type[LEFT] == DEL) {
-                tmp_line.char_type.push_back(DEL);
                 if (tmp_line.col_begin[LEFT] == 0) {
                     tmp_line.col_begin[LEFT] = tmp_file_diff[c].row_num[LEFT];
                 }
@@ -852,8 +913,6 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
 
                 last_eql_left  = tmp_file_diff[c].row_num[LEFT];
                 last_eql_right = tmp_file_diff[c].row_num[RIGHT];
-
-                tmp_line.char_type.push_back(EQL);
             }
         }
         tmp_line.col_end[LEFT]  = last_col_del;
@@ -877,8 +936,9 @@ static void update_diff_buffer(yed_buffer_ptr_t buff_orig, yed_buffer_ptr_t buff
 
 static void line_base_draw(yed_event *event) {
     yed_line  *tmp_line;
-    char      *color_var;
     yed_attrs  tmp_attr;
+
+    if (!diff_m.active) { return; }
 
     if (event->frame         == NULL
     ||  event->frame->buffer == NULL
@@ -888,21 +948,13 @@ static void line_base_draw(yed_event *event) {
 
     if (event->frame->buffer == diff_m.buff_diff[LEFT]) {
         if (diff_m.lines[event->row].line_type == INS) {
-            if ((color_var = yed_get_var("diff-insert-dashes-color"))) {
-                tmp_attr   = yed_parse_attrs(color_var);
-            }
+            tmp_attr = diff_m.attr_insert_dashes;
         } else if (diff_m.lines[event->row].line_type == DEL) {
-            if ((color_var = yed_get_var("diff-delete-color"))) {
-                tmp_attr   = yed_parse_attrs(color_var);
-            }
+            tmp_attr = diff_m.attr_delete;
         } else if (diff_m.lines[event->row].line_type == CHG) {
-            if ((color_var = yed_get_var("diff-inner-compare-color"))) {
-                tmp_attr   = yed_parse_attrs(color_var);
-            }
+            tmp_attr = diff_m.attr_inner_compare;
         } else if (diff_m.lines[event->row].line_type == TRUNC) {
-            if ((color_var = yed_get_var("diff-trunc-color"))) {
-                tmp_attr   = yed_parse_attrs(color_var);
-            }
+            tmp_attr = diff_m.attr_trunc;
         } else {
             return;
         }
@@ -912,23 +964,15 @@ static void line_base_draw(yed_event *event) {
 
         event->row_base_attr = tmp_attr;
 
-    }else if (event->frame->buffer == diff_m.buff_diff[RIGHT]) {
+    } else if (event->frame->buffer == diff_m.buff_diff[RIGHT]) {
         if (diff_m.lines[event->row].line_type == INS) {
-            if ((color_var = yed_get_var("diff-insert-color"))) {
-                tmp_attr   = yed_parse_attrs(color_var);
-            }
+            tmp_attr = diff_m.attr_insert;
         } else if (diff_m.lines[event->row].line_type == DEL) {
-            if ((color_var = yed_get_var("diff-delete-dashes-color"))) {
-                tmp_attr   = yed_parse_attrs(color_var);
-            }
+            tmp_attr = diff_m.attr_delete_dashes;
         } else if (diff_m.lines[event->row].line_type == CHG) {
-            if ((color_var = yed_get_var("diff-inner-compare-color"))) {
-                tmp_attr   = yed_parse_attrs(color_var);
-            }
+            tmp_attr = diff_m.attr_inner_compare;
         } else if (diff_m.lines[event->row].line_type == TRUNC) {
-            if ((color_var = yed_get_var("diff-trunc-color"))) {
-                tmp_attr   = yed_parse_attrs(color_var);
-            }
+            tmp_attr = diff_m.attr_trunc;
         } else {
             return;
         }
@@ -942,7 +986,6 @@ static void line_base_draw(yed_event *event) {
 
 static void line_char_draw(yed_event *event) {
     yed_line  *tmp_line;
-    char      *color_var;
     yed_attrs  tmp_attr;
     int        top_row;
     int        top_left_col;
@@ -950,6 +993,8 @@ static void line_char_draw(yed_event *event) {
     int        bot_right_col;
     int        left_col;
     int        right_col;
+
+    if (!diff_m.active) { return; }
 
     if (event->frame         == NULL
     ||  event->frame->buffer == NULL
@@ -963,15 +1008,9 @@ static void line_char_draw(yed_event *event) {
             if (tmp_line == NULL) { return; }
 
             for (int col = 1; col <= tmp_line->visual_width; col++) {
-                if (diff_m.lines[event->row].char_type.size() < col) {
-                    return;
-                }
-
                 if (col >= diff_m.lines[event->row].col_begin[LEFT]
                 && col <= diff_m.lines[event->row].col_end[LEFT]) {
-                    if ((color_var = yed_get_var("diff-inner-compare-char-color"))) {
-                        tmp_attr   = yed_parse_attrs(color_var);
-                    }
+                    tmp_attr = diff_m.attr_inner_compare_char;
 
                     if (diff_m.buff_diff[LEFT]->has_selection) {
                         if (diff_m.buff_diff[LEFT]->selection.anchor_row < diff_m.buff_diff[LEFT]->selection.cursor_row) {
@@ -1017,15 +1056,9 @@ static void line_char_draw(yed_event *event) {
             if (tmp_line == NULL) { return; }
 
             for (int col = 1; col <= tmp_line->visual_width; col++) {
-                if (diff_m.lines[event->row].char_type.size() < col) {
-                    return;
-                }
-
                 if (col >= diff_m.lines[event->row].col_begin[RIGHT]
                 && col <= diff_m.lines[event->row].col_end[RIGHT]) {
-                    if ((color_var = yed_get_var("diff-inner-compare-char-color"))) {
-                        tmp_attr   = yed_parse_attrs(color_var);
-                    }
+                    tmp_attr = diff_m.attr_inner_compare_char;
 
                     if (diff_m.buff_diff[RIGHT]->has_selection) {
                         if (diff_m.buff_diff[RIGHT]->selection.anchor_row < diff_m.buff_diff[RIGHT]->selection.cursor_row) {

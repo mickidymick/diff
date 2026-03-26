@@ -195,44 +195,30 @@ class Myers_linear {
             return NULL;
         }
 
-        vector<Point> *find_path(int left, int top, int right, int bottom) {
-            Snake         *snake;
-            vector<Point> *ret_snake;
-            vector<Point> *head;
-            vector<Point> *tail;
+        void find_path(int left, int top, int right, int bottom, vector<Point> &path) {
+            Snake *snake;
+            int    size_before;
 
             Box box = Box(left, top, right, bottom);
             snake   = midpoint(box);
 
             if (snake == NULL) {
-                return NULL;
+                return;
             }
 
-            head = find_path(box.left, box.top, snake->start.x, snake->start.y);
-            tail = find_path(snake->end.x, snake->end.y, box.right, box.bottom);
-
-            ret_snake = new vector<Point>;
-
-            if (head != NULL) {
-                for (int i = 0; i < head->size(); i++) {
-                    ret_snake->emplace_back(head->at(i).x, head->at(i).y);
-                }
-                free(head);
-            } else {
-                ret_snake->emplace_back(snake->start.x, snake->start.y);
+            size_before = (int)path.size();
+            find_path(box.left, box.top, snake->start.x, snake->start.y, path);
+            if ((int)path.size() == size_before) {
+                path.emplace_back(snake->start.x, snake->start.y);
             }
 
-            if (tail != NULL) {
-                for (int i = 0; i < tail->size(); i++) {
-                    ret_snake->emplace_back(tail->at(i).x, tail->at(i).y);
-                }
-                free(tail);
-            } else {
-                ret_snake->emplace_back(snake->end.x, snake->end.y);
+            size_before = (int)path.size();
+            find_path(snake->end.x, snake->end.y, box.right, box.bottom, path);
+            if ((int)path.size() == size_before) {
+                path.emplace_back(snake->end.x, snake->end.y);
             }
 
-            free(snake);
-            return ret_snake;
+            delete snake;
         }
 
         void add_to_diff(int x1, int y1, int x2, int y2, vector<file_diff> &f_diff) {
@@ -249,52 +235,38 @@ class Myers_linear {
             }
         }
 
-        vector<int> walk_diagonal(int &x1, int &y1, int &x2, int &y2, vector<file_diff> &f_diff) {
-            vector<int> tmp_arr(2);
-
+        void walk_diagonal(int &x1, int &y1, int x2, int y2, vector<file_diff> &f_diff) {
             while (x1 < x2 && y1 < y2 && a[wrap_indx(len_a, x1)] == b[wrap_indx(len_b, y1)]) {
                 add_to_diff(x1, y1, x1 + 1, y1 + 1, f_diff);
                 x1++;
                 y1++;
             }
-
-            tmp_arr[0] = x1;
-            tmp_arr[1] = y1;
-
-            return tmp_arr;
         }
 
         vector<file_diff> diff(void) {
-            vector<Point>    *path;
             int               x1;
             int               y1;
             int               x2;
             int               y2;
             int               path_len;
-            vector<int>       tmp_arr(2);
+            vector<Point>     path;
             vector<file_diff> f_diff;
 
-            path = find_path(0, 0, len_a, len_b);
+            find_path(0, 0, len_a, len_b, path);
 
-            if (path == NULL) {
-                return f_diff;
-            }
-
-            path_len = path->size();
+            path_len = (int)path.size();
 
             if (path_len == 0) {
                 return f_diff;
             }
 
             for (int i = 0; i < path_len - 1; i++) {
-                x1 = (*path)[i].x;
-                y1 = (*path)[i].y;
-                x2 = (*path)[i+1].x;
-                y2 = (*path)[i+1].y;
+                x1 = path[i].x;
+                y1 = path[i].y;
+                x2 = path[i+1].x;
+                y2 = path[i+1].y;
 
-                tmp_arr = walk_diagonal(x1, y1, x2, y2, f_diff);
-                x1 = tmp_arr[0];
-                y1 = tmp_arr[1];
+                walk_diagonal(x1, y1, x2, y2, f_diff);
 
                 if ((x2 - x1) < (y2 - y1)) {
                     add_to_diff(x1, y1, x1, y1 + 1, f_diff);
@@ -307,7 +279,6 @@ class Myers_linear {
                 walk_diagonal(x1, y1, x2, y2, f_diff);
             }
 
-            free(path);
             return f_diff;
         }
 };
