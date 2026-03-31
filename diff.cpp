@@ -500,11 +500,10 @@ static int init(void) {
 }
 
 static void expand_truncated_lines(int nargs, char **args) {
-    yed_frame              *frame;
-    char                   *tmp;
-    int                     row;
-    int                     j;
-    vector<line>::iterator  it;
+    yed_frame  *frame;
+    char       *tmp;
+    int         row;
+    int         j;
 
     frame = ys->active_frame;
 
@@ -516,7 +515,6 @@ static void expand_truncated_lines(int nargs, char **args) {
     row = frame->cursor_line;
 
     if (diff_m.lines[row].line_type == TRUNC && diff_m.lines[row].is_expanded == 0) {
-        it = diff_m.lines.begin();
         j = 1;
 
         for(int i = diff_m.lines[row].saved_lines.size()-1; i >= 0; i--) {
@@ -526,7 +524,7 @@ static void expand_truncated_lines(int nargs, char **args) {
             yed_buff_insert_string(diff_m.buff_diff[LEFT], diff_m.lines[row].saved_lines[i], row+j, 1);
             yed_buff_insert_line_no_undo(diff_m.buff_diff[RIGHT], row+j);
             yed_buff_insert_string(diff_m.buff_diff[RIGHT], diff_m.lines[row].saved_lines[i], row+j, 1);
-            diff_m.lines.insert(it + row + j, tmp_line);
+            diff_m.lines.insert(diff_m.lines.begin() + row + j, tmp_line);
             j++;
         }
 
@@ -549,11 +547,9 @@ static void expand_truncated_lines(int nargs, char **args) {
 }
 
 static void contract_truncated_lines(int nargs, char **args) {
-    yed_frame              *frame;
-    char                   *tmp;
-    int                     row;
-    int                     j;
-    vector<line>::iterator  it;
+    yed_frame  *frame;
+    char       *tmp;
+    int         row;
 
     frame = ys->active_frame;
 
@@ -565,12 +561,10 @@ static void contract_truncated_lines(int nargs, char **args) {
     row = frame->cursor_line;
 
     if (diff_m.lines[row].line_type == TRUNC && diff_m.lines[row].is_expanded == 1) {
-        it = diff_m.lines.begin();
-
         for (int i = diff_m.lines[row].trunc_rows + row; i >= row + 1; i--) {
             yed_buff_delete_line_no_undo(diff_m.buff_diff[LEFT], i);
             yed_buff_delete_line_no_undo(diff_m.buff_diff[RIGHT], i);
-            diff_m.lines.erase(it + i);
+            diff_m.lines.erase(diff_m.lines.begin() + i);
         }
 
         char trunc_str[35];
@@ -809,6 +803,13 @@ static void align_buffers(yed_buffer_ptr_t buff_1, yed_buffer_ptr_t buff_2) {
             diff_m.lines.push_back(std::move(tmp_line));
         }
     }
+
+    if (num_cont_eql_rows > 0) {
+        DBG("trailing flush: num_cont_eql_rows=%d last_row=%d lines_size_before=%d",
+            num_cont_eql_rows, array_len(diff_m.buff_diff[LEFT]->lines), (int)diff_m.lines.size());
+        truncate_lines(num_cont_eql_rows, array_len(diff_m.buff_diff[LEFT]->lines));
+        DBG("trailing flush done: lines_size_after=%d", (int)diff_m.lines.size());
+    }
 }
 
 static void diff_adjacent_line(line &tmp_line, int loc) {
@@ -928,9 +929,11 @@ static void update_diff_buffer(yed_buffer_ptr_t buff_orig, yed_buffer_ptr_t buff
 
     row = 1;
     bucket_array_traverse(buff_orig->lines, line) {
-        yed_buffer_add_line_no_undo(buff_diff);
+        if (row > 1) {
+            yed_buffer_add_line_no_undo(buff_diff);
+        }
         yed_buff_set_line_no_undo(buff_diff, row, line);
-        row ++;
+        row++;
     }
 }
 
@@ -942,7 +945,15 @@ static void line_base_draw(yed_event *event) {
 
     if (event->frame         == NULL
     ||  event->frame->buffer == NULL
-    ||  event->row           >= array_len(event->frame->buffer->lines)) {
+    ||  event->row           >  array_len(event->frame->buffer->lines)
+    ||  event->row           >= (int)diff_m.lines.size()) {
+        if (event->frame && event->frame->buffer
+        && (event->frame->buffer == diff_m.buff_diff[LEFT] || event->frame->buffer == diff_m.buff_diff[RIGHT])) {
+            DBG("line_base_draw skip: row=%d buff_lines=%d diff_lines_size=%d",
+                event->row,
+                array_len(event->frame->buffer->lines),
+                (int)diff_m.lines.size());
+        }
         return;
     }
 
@@ -998,7 +1009,8 @@ static void line_char_draw(yed_event *event) {
 
     if (event->frame         == NULL
     ||  event->frame->buffer == NULL
-    ||  event->row           >= array_len(event->frame->buffer->lines)) {
+    ||  event->row           >  array_len(event->frame->buffer->lines)
+    ||  event->row           >= (int)diff_m.lines.size()) {
         return;
     }
 

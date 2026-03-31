@@ -3,4 +3,5 @@
 .ccls-cache
 compile_commands.json
 debug_build.sh
-tests
+tests\
+.cache
