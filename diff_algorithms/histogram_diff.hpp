@@ -80,6 +80,8 @@ class Histogram {
 
                 if (i >= 0) {
                     match->prev = stacks[i];
+                } else {
+                    match->prev = NULL;
                 }
 
                 if (i + 1 >= (int)stacks.size()) {
@@ -158,21 +160,50 @@ class Histogram {
                 return NULL;
             }
 
-            match = NULL;
-            for (int i = 0; i < (int)order.size(); i++) {
-                const LineEntry &e = hashmap.at(order[i]);
-                if (e.count_a == min_count && e.count_b > 0) {
-                    if (match == NULL) {
-                        tmp_match  = new Match(e.idx_a, e.idx_b, NULL, NULL);
-                        match_ptrs.push_back(tmp_match);
-                        match      = tmp_match;
-                    } else {
-                        tmp_match        = new Match(e.idx_a, e.idx_b, last_match, NULL);
-                        match_ptrs.push_back(tmp_match);
-                        last_match->next = tmp_match;
-                    }
-                    last_match = tmp_match;
+            // Build B-position lists for qualifying line values (count_a == min_count).
+            // Iterate B in order so each list is already sorted ascending.
+            unordered_map<int, vector<int>> b_positions;
+            for (int i = slice.b_low; i < slice.b_high; i++) {
+                hashmap_iter = hashmap.find(b[i]);
+                if (hashmap_iter != hashmap.end()
+                &&  hashmap_iter->second.count_a == min_count
+                &&  hashmap_iter->second.count_b > 0) {
+                    b_positions[b[i]].push_back(i);
                 }
+            }
+
+            // Track how many B positions have been consumed per line value.
+            unordered_map<int, int> b_idx;
+
+            // Iterate A in order. For each qualifying A position, pair it with the
+            // next available B position for that line value. This produces a list
+            // sorted by a_line (required by patience_sort) covering all occurrences,
+            // not just the first — which is the key correctness fix for min_count > 1.
+            match = NULL;
+            for (int i = slice.a_low; i < slice.a_high; i++) {
+                hashmap_iter = hashmap.find(a[i]);
+                if (hashmap_iter == hashmap.end()
+                ||  hashmap_iter->second.count_a != min_count
+                ||  hashmap_iter->second.count_b == 0) {
+                    continue;
+                }
+
+                int val  = a[i];
+                int &idx = b_idx[val];
+                auto &bp = b_positions[val];
+                if (idx >= (int)bp.size()) {
+                    continue;
+                }
+
+                tmp_match = new Match(i, bp[idx], match == NULL ? NULL : last_match, NULL);
+                match_ptrs.push_back(tmp_match);
+                if (match == NULL) {
+                    match = tmp_match;
+                } else {
+                    last_match->next = tmp_match;
+                }
+                last_match = tmp_match;
+                idx++;
             }
 
             return match;

@@ -110,6 +110,8 @@ class Patience {
 
                 if (i >= 0) {
                     match->prev = stacks[i];
+                } else {
+                    match->prev = NULL;
                 }
 
                 if (i + 1 >= stacks.size()) {

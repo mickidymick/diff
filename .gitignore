@@ -3,5 +3,10 @@
 .ccls-cache
 compile_commands.json
 debug_build.sh
-tests\
 .cache
+
+# Test compiled binaries
+tests/test_algorithms
+tests/debug_*
+!tests/debug_*.cpp
+tests/*.o
