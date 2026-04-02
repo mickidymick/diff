@@ -81,6 +81,8 @@ typedef struct diff_main_t {
     yed_attrs         attr_inner_compare_char;
     yed_attrs         attr_trunc;
     bool              active;
+    vector<int>       line_indent;
+    vector<bool>      line_is_blank;
 } diff_main;
 
 diff_main         diff_m;
@@ -96,6 +98,7 @@ struct LineEntry { int count_a, count_b, idx_a, idx_b; };
 #include "diff_algorithms/myers_linear_diff.hpp"
 #include "diff_algorithms/patience_diff.hpp"
 #include "diff_algorithms/histogram_diff.hpp"
+#include "diff_algorithms/diff_postprocess.hpp"
 
 //Base Yed Plugin Functions
 static void cache_draw_attrs(void);
@@ -201,6 +204,34 @@ extern "C" {
 
         if (yed_get_var("diff-truncate-lines-min-num") == NULL) {
             yed_set_var("diff-truncate-lines-min-num", XSTR(12));
+        }
+
+        if (yed_get_var("diff-post-del-before-ins") == NULL) {
+            yed_set_var("diff-post-del-before-ins", "yes");
+        }
+
+        if (yed_get_var("diff-post-slide-down") == NULL) {
+            yed_set_var("diff-post-slide-down", "yes");
+        }
+
+        if (yed_get_var("diff-post-indent-heuristic") == NULL) {
+            yed_set_var("diff-post-indent-heuristic", "yes");
+        }
+
+        if (yed_get_var("diff-post-blank-line-gravity") == NULL) {
+            yed_set_var("diff-post-blank-line-gravity", "yes");
+        }
+
+        if (yed_get_var("diff-post-hunk-coalescence") == NULL) {
+            yed_set_var("diff-post-hunk-coalescence", "yes");
+        }
+
+        if (yed_get_var("diff-post-hunk-coalescence-max-gap") == NULL) {
+            yed_set_var("diff-post-hunk-coalescence-max-gap", XSTR(3));
+        }
+
+        if (yed_get_var("diff-post-semantic-cleanup") == NULL) {
+            yed_set_var("diff-post-semantic-cleanup", "yes");
         }
 
         cache_draw_attrs();
@@ -423,6 +454,36 @@ static void diff(int n_args, char **args) {
         diff_m.f_diff = histogram.diff(slice);
     }
 
+    if (yed_var_is_truthy("diff-post-del-before-ins")) {
+        postprocess_del_before_ins(diff_m.f_diff);
+    }
+
+    if (yed_var_is_truthy("diff-post-slide-down")) {
+        postprocess_slide_down(diff_m.f_diff, diff_m.line_buff[LEFT], diff_m.line_buff[RIGHT]);
+    }
+
+    if (yed_var_is_truthy("diff-post-indent-heuristic")) {
+        postprocess_indent_heuristic(diff_m.f_diff,
+                                     diff_m.line_buff[LEFT], diff_m.line_buff[RIGHT],
+                                     diff_m.line_indent, diff_m.line_is_blank);
+    }
+
+    if (yed_var_is_truthy("diff-post-blank-line-gravity")) {
+        postprocess_blank_line_gravity(diff_m.f_diff,
+                                       diff_m.line_buff[LEFT], diff_m.line_buff[RIGHT],
+                                       diff_m.line_is_blank);
+    }
+
+    if (yed_var_is_truthy("diff-post-hunk-coalescence")) {
+        int gap = 3;
+        yed_get_var_as_int("diff-post-hunk-coalescence-max-gap", &gap);
+        postprocess_hunk_coalescence(diff_m.f_diff, gap);
+    }
+
+    if (yed_var_is_truthy("diff-post-semantic-cleanup")) {
+        postprocess_semantic_cleanup(diff_m.f_diff);
+    }
+
     if (diff_m.f_diff.size() == 0) {
         yed_cerr("Files were the same!");
         return;
@@ -461,6 +522,8 @@ static int init(void) {
 
     diff_m.line_buff[LEFT].clear();
     diff_m.line_buff[RIGHT].clear();
+    diff_m.line_indent.clear();
+    diff_m.line_is_blank.clear();
 
     unique_id = 0;
 
@@ -476,6 +539,13 @@ static int init(void) {
         } else {
             diff_m.line_buff[LEFT].push_back(unique_id);
             hashmap.insert({A, unique_id});
+
+            int indent = 0;
+            const char *s = (char *)(line->chars.data);
+            while (*s == ' ' || *s == '\t') { indent++; s++; }
+            diff_m.line_indent.push_back(indent);
+            diff_m.line_is_blank.push_back(*s == '\0' || *s == '\n');
+
             unique_id++;
         }
     }
@@ -492,6 +562,13 @@ static int init(void) {
         } else {
             diff_m.line_buff[RIGHT].push_back(unique_id);
             hashmap.insert({B, unique_id});
+
+            int indent = 0;
+            const char *s = (char *)(line->chars.data);
+            while (*s == ' ' || *s == '\t') { indent++; s++; }
+            diff_m.line_indent.push_back(indent);
+            diff_m.line_is_blank.push_back(*s == '\0' || *s == '\n');
+
             unique_id++;
         }
     }

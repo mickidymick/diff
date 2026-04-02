@@ -53,6 +53,7 @@ struct LineEntry { int count_a, count_b, idx_a, idx_b; };
 #include "../diff_algorithms/myers_linear_diff.hpp"
 #include "../diff_algorithms/patience_diff.hpp"
 #include "../diff_algorithms/histogram_diff.hpp"
+#include "../diff_algorithms/diff_postprocess.hpp"
 
 /* ── test framework ──────────────────────────────────────────────────────── */
 
@@ -384,6 +385,296 @@ static void test_edge_cases() {
     test_all("200 lines one change", big, big2);
 }
 
+/* ── post-processing tests ─────────────────────────────────────────────────── */
+
+/* helper: check that a postprocessed diff is still valid */
+static void run_pp_test(const char        *name,
+                        const vector<int> &a,
+                        const vector<int> &b,
+                        vector<file_diff>  d) {
+    tests_run++;
+    string err = verify(a, b, d);
+    if (err.empty()) {
+        tests_passed++;
+        printf("  PASS  [postprocess] %s\n", name);
+    } else {
+        tests_failed++;
+        printf("  FAIL  [postprocess] %s\n        %s\n", name, err.c_str());
+    }
+}
+
+static void test_del_before_ins() {
+    printf("\n── postprocess: DEL-before-INS ──────────────────────────────\n");
+
+    /* Build a diff with interleaved INS/DEL: INS, DEL, INS, DEL
+     * After postprocess, should be DEL, DEL, INS, INS */
+    vector<int> a = {1, 2, 3};
+    vector<int> b = {4, 5, 3};
+
+    /* Manually create: INS(b=0), DEL(a=0), INS(b=1), DEL(a=1), EQL(a=2,b=2) */
+    vector<file_diff> d;
+    d.emplace_back(INS, 1, INS, 1);
+    d.emplace_back(DEL, 1, DEL, 1);
+    d.emplace_back(INS, 2, INS, 2);
+    d.emplace_back(DEL, 2, DEL, 2);
+    d.emplace_back(EQL, 3, EQL, 3);
+
+    postprocess_del_before_ins(d);
+
+    /* Verify DELs come before INS */
+    tests_run++;
+    if (d[0].type[LEFT] == DEL && d[1].type[LEFT] == DEL
+    &&  d[2].type[LEFT] == INS && d[3].type[LEFT] == INS
+    &&  d[4].type[LEFT] == EQL) {
+        tests_passed++;
+        printf("  PASS  [postprocess] del-before-ins reordering\n");
+    } else {
+        tests_failed++;
+        printf("  FAIL  [postprocess] del-before-ins reordering\n");
+    }
+
+    /* Run through all algorithms and verify postprocess preserves correctness */
+    {
+        vector<int> pa = {1,2,3,4,5};
+        vector<int> pb = {6,2,7,4,8};
+        Myers<vector<int>> m(pa, pa.size(), pb, pb.size());
+        auto md = m.diff();
+        postprocess_del_before_ins(md);
+        run_pp_test("del-before-ins correctness (myers)", pa, pb, md);
+    }
+    {
+        vector<int> pa = {1,2,3,4,5};
+        vector<int> pb = {6,2,7,4,8};
+        Histogram<vector<int>> h(pa, pa.size(), pb, pb.size());
+        Slice s(0, h.len_a, 0, h.len_b);
+        auto hd = h.diff(s);
+        postprocess_del_before_ins(hd);
+        run_pp_test("del-before-ins correctness (histogram)", pa, pb, hd);
+    }
+}
+
+static void test_slide_down() {
+    printf("\n── postprocess: slide-down ──────────────────────────────────\n");
+
+    /* A = {1,1,1,2}, B = {1,1,2} — one "1" deleted.
+     * Raw diff might place DEL at the first "1".
+     * Slide-down should push it to the last "1" (before the "2"). */
+    {
+        vector<int> a = {1,1,1,2};
+        vector<int> b = {1,1,2};
+        Myers<vector<int>> m(a, a.size(), b, b.size());
+        auto d = m.diff();
+        postprocess_slide_down(d, a, b);
+        run_pp_test("slide-down del correctness", a, b, d);
+
+        /* The DEL should be the last entry before EQL(2), not the first */
+        tests_run++;
+        bool del_at_end = false;
+        for (int i = 0; i < (int)d.size(); i++) {
+            if (d[i].type[LEFT] == DEL) {
+                /* Check: the entry after this DEL (if EQL) should be the "2" */
+                if (i + 1 < (int)d.size() && d[i+1].type[LEFT] == EQL
+                &&  a[d[i+1].row_num[LEFT]-1] == 2) {
+                    del_at_end = true;
+                }
+            }
+        }
+        if (del_at_end) {
+            tests_passed++;
+            printf("  PASS  [postprocess] slide-down del position\n");
+        } else {
+            tests_failed++;
+            printf("  FAIL  [postprocess] slide-down del position\n");
+        }
+    }
+
+    /* INS case: A = {1,1,2}, B = {1,1,1,2} */
+    {
+        vector<int> a = {1,1,2};
+        vector<int> b = {1,1,1,2};
+        Myers<vector<int>> m(a, a.size(), b, b.size());
+        auto d = m.diff();
+        postprocess_slide_down(d, a, b);
+        run_pp_test("slide-down ins correctness", a, b, d);
+    }
+}
+
+static void test_indent_heuristic() {
+    printf("\n── postprocess: indent heuristic ────────────────────────────\n");
+
+    /* Simulate lines with different indentation.
+     * Use line values where we can set up indent/blank info.
+     * Value 0 = blank (indent 0), value 1 = "}" (indent 0),
+     * value 2 = "    x = 1;" (indent 4) */
+    {
+        vector<int> a = {2, 2, 1, 1, 0};
+        vector<int> b = {2, 2, 1, 0};
+        /* indent: 0=blank, 1=indent0, 2=indent4 */
+        vector<int>  indent   = {0, 0, 4};
+        vector<bool> is_blank = {true, false, false};
+
+        Myers<vector<int>> m(a, a.size(), b, b.size());
+        auto d = m.diff();
+        postprocess_slide_down(d, a, b);
+        postprocess_indent_heuristic(d, a, b, indent, is_blank);
+        run_pp_test("indent heuristic correctness", a, b, d);
+    }
+
+    /* Larger case through full pipeline */
+    {
+        vector<int> a = {3,3,3,1,2,2,2};
+        vector<int> b = {3,3,1,2,2,2};
+        vector<int>  indent   = {0, 0, 4, 2};
+        vector<bool> is_blank = {true, false, false, false};
+
+        Myers<vector<int>> m(a, a.size(), b, b.size());
+        auto d = m.diff();
+        postprocess_del_before_ins(d);
+        postprocess_slide_down(d, a, b);
+        postprocess_indent_heuristic(d, a, b, indent, is_blank);
+        run_pp_test("indent heuristic full pipeline", a, b, d);
+    }
+}
+
+static void test_blank_line_gravity() {
+    printf("\n── postprocess: blank-line gravity ──────────────────────────\n");
+
+    /* Value 0 = blank, value 1 = "}", value 2 = code
+     * A = {1,1,0,2}, B = {1,0,2} — DEL of "}" should slide toward blank */
+    {
+        vector<int> a = {1, 1, 0, 2};
+        vector<int> b = {1, 0, 2};
+        vector<bool> is_blank = {true, false, false};
+
+        Myers<vector<int>> m(a, a.size(), b, b.size());
+        auto d = m.diff();
+        postprocess_blank_line_gravity(d, a, b, is_blank);
+        run_pp_test("blank-line gravity correctness", a, b, d);
+    }
+}
+
+static void test_hunk_coalescence() {
+    printf("\n── postprocess: hunk coalescence ────────────────────────────\n");
+
+    /* Two changes separated by 2 EQL lines (under threshold of 3).
+     * A = {1,2,3,4,5}, B = {9,2,3,4,8}
+     * Changes at positions 0 and 4 with 3 EQLs between.
+     * gap=3 should merge. */
+    {
+        vector<int> a = {1,2,3,4,5};
+        vector<int> b = {9,2,3,4,8};
+
+        Myers<vector<int>> m(a, a.size(), b, b.size());
+        auto d = m.diff();
+        postprocess_hunk_coalescence(d, 3);
+
+        /* After coalescence, there should be no EQL entries (all merged) */
+        tests_run++;
+        int eql_count = count_eql(d);
+        if (eql_count == 0) {
+            tests_passed++;
+            printf("  PASS  [postprocess] hunk coalescence merges small gap\n");
+        } else {
+            tests_failed++;
+            printf("  FAIL  [postprocess] hunk coalescence merges small gap"
+                   " (EQL count=%d, expected 0)\n", eql_count);
+        }
+    }
+
+    /* Gap too large — should NOT merge */
+    {
+        vector<int> a = {1,2,3,4,5,6};
+        vector<int> b = {9,2,3,4,5,8};
+
+        Myers<vector<int>> m(a, a.size(), b, b.size());
+        auto d = m.diff();
+        int eql_before = count_eql(d);
+        postprocess_hunk_coalescence(d, 3);
+        int eql_after = count_eql(d);
+
+        tests_run++;
+        if (eql_after == eql_before) {
+            tests_passed++;
+            printf("  PASS  [postprocess] hunk coalescence preserves large gap\n");
+        } else {
+            tests_failed++;
+            printf("  FAIL  [postprocess] hunk coalescence preserves large gap"
+                   " (EQL before=%d after=%d)\n", eql_before, eql_after);
+        }
+    }
+}
+
+static void test_semantic_cleanup() {
+    printf("\n── postprocess: semantic cleanup ────────────────────────────\n");
+
+    /* A = {1,2,3,4,5,6,7}, B = {9,8,3,4,5,10,11,12}
+     * Two change blocks separated by a gap.  If gap < min(block_sizes),
+     * they should merge. */
+    {
+        vector<int> a = {1,2,3,7};
+        vector<int> b = {9,8,3,10};
+
+        Myers<vector<int>> m(a, a.size(), b, b.size());
+        auto d = m.diff();
+        int eql_before = count_eql(d);
+        postprocess_semantic_cleanup(d);
+        int eql_after = count_eql(d);
+
+        tests_run++;
+        /* gap of 1 EQL between two blocks of 2 edits each: should merge */
+        if (eql_after < eql_before) {
+            tests_passed++;
+            printf("  PASS  [postprocess] semantic cleanup merges\n");
+        } else {
+            tests_failed++;
+            printf("  FAIL  [postprocess] semantic cleanup merges"
+                   " (EQL before=%d after=%d)\n", eql_before, eql_after);
+        }
+    }
+
+    /* Full pipeline correctness: run all postprocessing and verify */
+    {
+        vector<int> a = {1,2,3,4,5,6,7,8,9,10};
+        vector<int> b = {1,20,3,40,5,6,70,8,90,10};
+        vector<int>  indent   = {};
+        vector<bool> is_blank = {};
+        /* Fill indent/blank for all possible IDs */
+        for (int i = 0; i <= 100; i++) {
+            indent.push_back(i % 5);
+            is_blank.push_back(false);
+        }
+
+        Myers<vector<int>> m(a, a.size(), b, b.size());
+        auto d = m.diff();
+        postprocess_del_before_ins(d);
+        postprocess_slide_down(d, a, b);
+        postprocess_indent_heuristic(d, a, b, indent, is_blank);
+        postprocess_blank_line_gravity(d, a, b, is_blank);
+        postprocess_hunk_coalescence(d, 3);
+        postprocess_semantic_cleanup(d);
+        /* After coalescence/semantic, verify is not applicable in the
+         * standard sense (EQLs may have been converted), so just check
+         * that no crash occurred and the diff is non-empty. */
+        tests_run++;
+        if (d.size() > 0) {
+            tests_passed++;
+            printf("  PASS  [postprocess] full pipeline no crash\n");
+        } else {
+            tests_failed++;
+            printf("  FAIL  [postprocess] full pipeline produced empty diff\n");
+        }
+    }
+}
+
+static void test_postprocess() {
+    test_del_before_ins();
+    test_slide_down();
+    test_indent_heuristic();
+    test_blank_line_gravity();
+    test_hunk_coalescence();
+    test_semantic_cleanup();
+}
+
 /* ── main ─────────────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -396,6 +687,7 @@ int main(void) {
     test_unrelated_files();
     test_histogram_quality();
     test_edge_cases();
+    test_postprocess();
 
     printf("\n==========================================================\n");
     printf("results: %d/%d passed", tests_passed, tests_run);
