@@ -666,6 +666,70 @@ static void test_semantic_cleanup() {
     }
 }
 
+static void test_cascade_prevention() {
+    printf("\n── postprocess: cascade prevention ──────────────────────────\n");
+
+    /* Wildly different files with many scattered small EQL gaps.
+     * Pattern: change, 1 EQL, change, 2 EQL, change, 1 EQL, change, 3 EQL, ...
+     * Before the fix, hunk coalescence + semantic cleanup would cascade-merge
+     * ALL the EQL gaps, collapsing the diff into one giant change block.
+     * After the fix, each gap is evaluated independently — some merge, but
+     * the merged block should NOT absorb the next gap. */
+    {
+        /* A and B share scattered common lines among mostly-different content.
+         * A = d d c d d c c d d c d d c c c d d ...
+         * B = e e c e e c c e e c e e c c c e e ...
+         * where d/e are unique (different), c are common. */
+        vector<int> a, b;
+        int uid_a = 100, uid_b = 500;
+        int common = 1;
+        /* 5 blocks of changes separated by gaps of varying sizes */
+        int gap_sizes[] = {1, 2, 1, 3, 2};
+        for (int blk = 0; blk < 6; blk++) {
+            /* change block: 4 unique lines in each file */
+            for (int j = 0; j < 4; j++) {
+                a.push_back(uid_a++);
+                b.push_back(uid_b++);
+            }
+            /* EQL gap (except after last block) */
+            if (blk < 5) {
+                for (int j = 0; j < gap_sizes[blk]; j++) {
+                    a.push_back(common);
+                    b.push_back(common);
+                    common++;
+                }
+            }
+        }
+
+        Myers<vector<int>> m(a, a.size(), b, b.size());
+        auto d = m.diff();
+
+        int eql_before = count_eql(d);
+
+        postprocess_hunk_coalescence(d, 3);
+        int eql_after_hunk = count_eql(d);
+
+        postprocess_semantic_cleanup(d);
+        int eql_after_semantic = count_eql(d);
+
+        tests_run++;
+        /* Total EQL lines = 1+2+1+3+2 = 9.  Without cascading, some gaps
+         * merge but not all.  With cascading, all 9 EQL lines get consumed.
+         * We require that at least SOME EQL survive after both passes. */
+        if (eql_after_semantic > 0) {
+            tests_passed++;
+            printf("  PASS  [postprocess] cascade prevention"
+                   "  (EQL: raw=%d after_hunk=%d after_semantic=%d)\n",
+                   eql_before, eql_after_hunk, eql_after_semantic);
+        } else {
+            tests_failed++;
+            printf("  FAIL  [postprocess] cascade prevention — all EQL consumed"
+                   "  (EQL: raw=%d after_hunk=%d after_semantic=%d)\n",
+                   eql_before, eql_after_hunk, eql_after_semantic);
+        }
+    }
+}
+
 static void test_postprocess() {
     test_del_before_ins();
     test_slide_down();
@@ -673,6 +737,7 @@ static void test_postprocess() {
     test_blank_line_gravity();
     test_hunk_coalescence();
     test_semantic_cleanup();
+    test_cascade_prevention();
 }
 
 /* ── main ─────────────────────────────────────────────────────────────────── */

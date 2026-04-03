@@ -340,6 +340,12 @@ static void postprocess_hunk_coalescence(vector<file_diff> &d, int gap_threshold
             continue;
         }
 
+        // Skip past the second change block so we know its extent.
+        while (i < n && (d[i].type[LEFT] == INS || d[i].type[LEFT] == DEL)) {
+            i++;
+        }
+        int block2_end = i;
+
         // If gap is small enough, convert EQL entries to DEL+INS pairs.
         if (gap_len > 0 && gap_len <= gap_threshold) {
             vector<file_diff> replacements;
@@ -351,9 +357,10 @@ static void postprocess_hunk_coalescence(vector<file_diff> &d, int gap_threshold
             d.erase(d.begin() + gap_start, d.begin() + gap_end);
             d.insert(d.begin() + gap_start, replacements.begin(), replacements.end());
 
-            // Adjust n and restart scan from the merged block.
+            // Adjust n and skip past the entire merged region (block1 + converted
+            // gap + block2) so the merged block doesn't cascade into the next gap.
             n = (int)d.size();
-            i = gap_start;
+            i = block2_end + gap_len;
         }
     }
 }
@@ -401,6 +408,7 @@ static void postprocess_semantic_cleanup(vector<file_diff> &d) {
             i++;
         }
         int block2_len = i - block2_start;
+        int block2_end = i;
 
         // Merge if gap is shorter than the smaller block.
         int min_block = block1_len < block2_len ? block1_len : block2_len;
@@ -414,8 +422,10 @@ static void postprocess_semantic_cleanup(vector<file_diff> &d) {
             d.erase(d.begin() + gap_start, d.begin() + gap_end);
             d.insert(d.begin() + gap_start, replacements.begin(), replacements.end());
 
+            // Adjust n and skip past the entire merged region (block1 + converted
+            // gap + block2) so the merged block doesn't cascade into the next gap.
             n = (int)d.size();
-            i = block1_start;
+            i = block2_end + gap_len;
         }
     }
 }

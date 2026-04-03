@@ -452,6 +452,9 @@ static void diff(int n_args, char **args) {
                                     diff_m.line_buff[RIGHT], diff_m.line_buff[RIGHT].size());
         Slice slice = Slice(0, histogram.len_a, 0, histogram.len_b);
         diff_m.f_diff = histogram.diff(slice);
+    } else {
+        yed_cerr("Unknown diff algorithm '%s'. Expected: myers, myers_linear, patience, or histogram.", diff_multi_line_var);
+        return;
     }
 
     if (yed_var_is_truthy("diff-post-del-before-ins")) {
@@ -912,6 +915,7 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
 
         vector<file_diff> tmp_file_diff;
         diff_line_var = yed_get_var("diff-line-compare-algorithm");
+        if (diff_line_var == NULL) { diff_line_var = "histogram"; }
         if (strcmp(diff_line_var, "myers") == 0) {
             Myers<string> myers_r(left, left_len, right, right_len);
             tmp_file_diff = myers_r.diff();
@@ -942,7 +946,7 @@ static void diff_adjacent_line(line &tmp_line, int loc) {
             Patience<vector<int>> patience_r(left_v, left_v.size(), right_v, right_v.size());
             Slice slice = Slice(0, patience_r.len_a, 0, patience_r.len_b);
             tmp_file_diff = patience_r.diff(slice);
-        } else if (strcmp(diff_line_var, "histogram") == 0) {
+        } else {
             vector<int> left_v(left_len);
             for (int i = 0; i < left_len; i++) {
                 left_v[i] = left[i] - '0';
