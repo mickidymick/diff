@@ -32,6 +32,10 @@ class Myers {
             int                 size;
             vector<vector<int>> trace;
 
+            if (max == 0) {
+                return trace;
+            }
+
             size = 2 * max + 1;
 
             vector<int> v(size);
